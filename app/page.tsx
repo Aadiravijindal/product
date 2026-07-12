@@ -15,6 +15,7 @@ export default function Home() {
   const [reviewer, setReviewer] = useState('');
   const [scanning, setScanning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [lastScan, setLastScan] = useState<{ id: string; name: string } | null>(null);
 
   useEffect(() => {
     fetch('/api/repos')
@@ -25,6 +26,10 @@ export default function Home() {
       })
       .catch(() => setError('Could not load sample repos.'));
     setReviewer(window.localStorage.getItem('recrypt.reviewer') || '');
+    try {
+      const last = window.localStorage.getItem('recrypt.lastScan');
+      if (last) setLastScan(JSON.parse(last));
+    } catch { /* ignore corrupt localStorage */ }
   }, []);
 
   const saveReviewer = (name: string) => {
@@ -54,7 +59,15 @@ export default function Home() {
     <div className="shell">
       <TopBar />
       <h1>Connect a codebase</h1>
-      <p className="sub">Scan for quantum-vulnerable cryptography, generate hybrid post-quantum patches, and verify them.</p>
+      <p className="sub">
+        Scan for quantum-vulnerable cryptography, generate hybrid post-quantum patches, and verify them.
+        {lastScan && (
+          <>
+            {' · '}
+            <a href={`/scan/${lastScan.id}`}>Resume last scan ({lastScan.name}) →</a>
+          </>
+        )}
+      </p>
 
       {error && <div className="notice">{error}</div>}
       {claude === false && (
@@ -121,6 +134,9 @@ export default function Home() {
         existing CBOM/discovery tool (SandboxAQ, IBM, Arqit, …) and to your repos. Equivalence tests execute real
         cryptography: RSA/ECDH via the platform crypto library, ML-DSA-65 (FIPS 204) and ML-KEM-768 (FIPS 203) via
         audited post-quantum implementations.
+        <br />
+        Migration targets follow the NIST standards finalized August 13, 2024 (FIPS 203/204/205). US federal deadlines:
+        quantum-safe key establishment by 2030, digital signatures by 2031 — cascading to contractors via CNSA 2.0.
       </p>
     </div>
   );

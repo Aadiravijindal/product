@@ -60,6 +60,7 @@ export default function Certificate() {
       <div className="cert-page">
         <div className="cert-brand">⬡ Recrypt</div>
         <h1>Post-Quantum Migration Certificate</h1>
+        <p className="cert-line"><b>Certificate ID:</b> RC-{scan.id.toUpperCase()}</p>
         <p className="cert-line"><b>System assessed:</b> {sourceName}</p>
         <p className="cert-line"><b>Date generated:</b> {new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</p>
 

@@ -23,6 +23,9 @@ export default function ScanResults() {
   }, [scanId]);
 
   useEffect(load, [load]);
+  useEffect(() => {
+    if (scan) window.localStorage.setItem('recrypt.lastScan', JSON.stringify({ id: scan.id, name: scan.source.type === 'repo' ? scan.source.repoName : 'pasted snippet' }));
+  }, [scan]);
 
   if (error) {
     return (

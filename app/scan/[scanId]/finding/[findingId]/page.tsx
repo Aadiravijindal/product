@@ -9,6 +9,33 @@ import type { Finding } from '@/lib/types';
 
 const THRESHOLD = 85;
 
+const AGENT_STEPS = [
+  'Classifying algorithm, key size, and business context…',
+  'Generating hybrid post-quantum patch (ML-DSA / ML-KEM)…',
+  'Running equivalence tests — real classical + post-quantum crypto…',
+];
+
+function AgentProgress() {
+  const [step, setStep] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setStep((s) => Math.min(s + 1, AGENT_STEPS.length - 1)), 1600);
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <div className="loading-panel">
+      <div className="spinner" />
+      <div style={{ fontSize: 16, marginBottom: 14 }}>Remediation agent working…</div>
+      <div className="agent-steps">
+        {AGENT_STEPS.map((s, i) => (
+          <div key={i} className={`agent-step ${i < step ? 'done' : i === step ? 'now' : ''}`}>
+            <span className="agent-step-ico">{i < step ? '✓' : i === step ? '›' : '·'}</span> {s}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function FindingDetail() {
   const { scanId, findingId } = useParams<{ scanId: string; findingId: string }>();
   const router = useRouter();
@@ -88,13 +115,7 @@ export default function FindingDetail() {
     return (
       <div className="shell">
         <TopBar scanId={scanId} />
-        <div className="loading-panel">
-          <div className="spinner" />
-          <div style={{ fontSize: 16, marginBottom: 10 }}>Remediation agent working…</div>
-          <div className="loading-steps">
-            classify finding → generate hybrid patch → run equivalence tests
-          </div>
-        </div>
+        <AgentProgress />
       </div>
     );
   }

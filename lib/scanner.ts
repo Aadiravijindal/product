@@ -212,8 +212,8 @@ export function detectLanguage(filePath: string, code: string): string {
     return 'python';
   }
   if (/public\s+(class|static|final)/.test(code) || /KeyPairGenerator/.test(code)) return 'java';
+  if (/(^|\n)\s*\w+(\s*,\s*\w+)?\s*:=\s/.test(code) || /if\s+err\s*!=\s*nil/.test(code) || (/func\s+\w+\s*\(/.test(code) && /package\s+\w+/.test(code))) return 'go';
   if (/\b(const|let|require\(|=>)\b/.test(code)) return 'javascript';
-  if (/func\s+\w+\s*\(/.test(code) && /package\s+\w+/.test(code)) return 'go';
   return 'unknown';
 }
 
