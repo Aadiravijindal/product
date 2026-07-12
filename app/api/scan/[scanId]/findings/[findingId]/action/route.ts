@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getFinding } from '@/lib/store';
+import { getFinding, persist } from '@/lib/store';
 import type { FindingStatus } from '@/lib/types';
 
 const ACTIONS: Record<string, FindingStatus> = {
@@ -26,5 +26,6 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ scanId: st
   finding.status = status;
   finding.reviewer = (body.reviewer || 'Demo User').slice(0, 80);
   finding.reviewedAt = new Date().toISOString();
+  persist();
   return NextResponse.json({ finding });
 }

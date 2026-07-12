@@ -16,6 +16,9 @@ export default function Home() {
   const [scanning, setScanning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastScan, setLastScan] = useState<{ id: string; name: string } | null>(null);
+  const [history, setHistory] = useState<
+    { id: string; name: string; createdAt: string; findings: number; migrated: number; critical: number }[]
+  >([]);
 
   useEffect(() => {
     fetch('/api/repos')
@@ -30,6 +33,10 @@ export default function Home() {
       const last = window.localStorage.getItem('recrypt.lastScan');
       if (last) setLastScan(JSON.parse(last));
     } catch { /* ignore corrupt localStorage */ }
+    fetch('/api/scans')
+      .then((r) => r.json())
+      .then((d) => setHistory(d.scans ?? []))
+      .catch(() => {});
   }, []);
 
   const saveReviewer = (name: string) => {
@@ -128,6 +135,28 @@ export default function Home() {
           </label>
         </div>
       </div>
+
+      {history.length > 0 && (
+        <div className="section" style={{ marginTop: 34 }}>
+          <h2>Recent scans</h2>
+          <table className="findings">
+            <thead>
+              <tr><th>Scanned</th><th>Source</th><th>Findings</th><th>Migrated</th><th></th></tr>
+            </thead>
+            <tbody>
+              {history.map((h) => (
+                <tr key={h.id} onClick={() => router.push(`/scan/${h.id}`)}>
+                  <td>{new Date(h.createdAt).toLocaleString()}</td>
+                  <td className="mono">{h.name}</td>
+                  <td>{h.findings}{h.critical > 0 ? ` (${h.critical} critical)` : ''}</td>
+                  <td>{h.migrated} of {h.findings}</td>
+                  <td style={{ color: 'var(--blue)' }}>Open →</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       <p className="footnote">
         Demo mode — scans local sample files and pasted snippets only. The production version connects via API to your

@@ -9,6 +9,17 @@ import type { Finding } from '@/lib/types';
 
 const THRESHOLD = 85;
 
+function downloadPatch(finding: Finding, patchedCode: string) {
+  const base = finding.file.split('/').pop() || 'patched';
+  const blob = new Blob([patchedCode], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${base}.quantum-safe`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 const AGENT_STEPS = [
   'Classifying algorithm, key size, and business context…',
   'Generating hybrid post-quantum patch (ML-DSA / ML-KEM)…',
@@ -43,6 +54,7 @@ export default function FindingDetail() {
   const [phase, setPhase] = useState<'loading' | 'analyzing' | 'ready' | 'error'>('loading');
   const [error, setError] = useState<string | null>(null);
   const [acting, setActing] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const analyze = useCallback(async () => {
     setPhase('analyzing');
@@ -81,6 +93,14 @@ export default function FindingDetail() {
     return sideBySideDiff(finding.fullCode, finding.analysis.patchedCode);
   }, [finding]);
 
+  const copyPatch = async (code: string) => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch { /* clipboard unavailable (non-secure context) */ }
+  };
+
   const act = async (action: 'approve' | 'reject' | 'escalate') => {
     setActing(true);
     try {
@@ -90,7 +110,7 @@ export default function FindingDetail() {
         body: JSON.stringify({ action, reviewer: getReviewer() }),
       });
       if (!res.ok) throw new Error('action failed');
-      router.push(`/scan/${scanId}`);
+      router.push(`/scan/${scanId}?just=${findingId}`);
     } catch {
       setError('Could not record the decision — please retry.');
       setActing(false);
@@ -156,7 +176,13 @@ export default function FindingDetail() {
       </div>
 
       <div className="section">
-        <h2>Proposed fix</h2>
+        <h2>
+          Proposed fix
+          <span style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+            <button className="btn btn-sm" onClick={() => downloadPatch(finding, a.patchedCode)}>Download patched file</button>
+            <button className="btn btn-sm" onClick={() => void copyPatch(a.patchedCode)}>{copied ? 'Copied ✓' : 'Copy patch'}</button>
+          </span>
+        </h2>
         <div className="diff-wrap">
           <div className="diff-titles">
             <div className="t-old">Current (vulnerable)</div>
@@ -203,9 +229,15 @@ export default function FindingDetail() {
         {a.tests.map((t, i) => (
           <div className="test-line" key={i}>
             <span className={`test-ico ${t.passed ? 'pass' : 'fail'}`}>{t.passed ? '✓' : '✗'}</span>
-            <span>
+            <span style={{ flex: 1 }}>
               {t.name}
               <span className="test-detail">{t.detail}</span>
+              {t.evidence && (
+                <details className="evidence">
+                  <summary>View cryptographic evidence</summary>
+                  <pre>{t.evidence}</pre>
+                </details>
+              )}
             </span>
           </div>
         ))}

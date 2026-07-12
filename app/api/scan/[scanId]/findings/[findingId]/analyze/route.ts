@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getFinding } from '@/lib/store';
+import { getFinding, persist } from '@/lib/store';
 import { claudeAvailable, classifyFinding, generateRemediation } from '@/lib/claude';
 import { builtinRemediation } from '@/lib/remediation';
 import { runEquivalenceTests } from '@/lib/verify';
@@ -77,5 +77,6 @@ export async function POST(_req: NextRequest, ctx: { params: Promise<{ scanId: s
   analysis.tests = runEquivalenceTests(finding, analysis.patchedCode);
 
   finding.analysis = analysis;
+  persist();
   return NextResponse.json({ finding });
 }

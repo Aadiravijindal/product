@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSampleRepo } from '@/lib/samples';
-import { scanFiles } from '@/lib/scanner';
+import { PATTERN_COUNT, scanFiles } from '@/lib/scanner';
 import { newScanId, saveScan } from '@/lib/store';
 import type { Scan } from '@/lib/types';
 
@@ -18,6 +18,7 @@ export async function POST(req: NextRequest) {
   }
 
   const scanId = newScanId();
+  const t0 = process.hrtime.bigint();
   let scan: Scan;
 
   if (body.repoId) {
@@ -29,6 +30,7 @@ export async function POST(req: NextRequest) {
       source: { type: 'repo', repoId: repo.id, repoName: repo.name },
       createdAt: new Date().toISOString(),
       findings,
+      stats: { files: repo.files.length, patterns: PATTERN_COUNT, durationMs: Number(process.hrtime.bigint() - t0) / 1e6 },
     };
   } else if (typeof body.code === 'string' && body.code.trim().length > 0) {
     if (body.code.length > 200_000) {
@@ -43,6 +45,7 @@ export async function POST(req: NextRequest) {
       source: { type: 'snippet', label: 'Pasted snippet' },
       createdAt: new Date().toISOString(),
       findings,
+      stats: { files: 1, patterns: PATTERN_COUNT, durationMs: Number(process.hrtime.bigint() - t0) / 1e6 },
     };
   } else {
     return NextResponse.json({ error: 'provide repoId or code' }, { status: 400 });

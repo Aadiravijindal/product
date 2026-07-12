@@ -1,7 +1,10 @@
-# Recrypt — Post-Quantum Migration Agent (MVP demo)
+# Recrypt — Post-Quantum Migration Agent
 
 Find quantum-vulnerable cryptography, generate hybrid post-quantum patches, verify them with real
 equivalence tests, and hand your auditor a certificate.
+
+Verified by 175 automated checks (135 API + 40 full-browser UI) on the production build,
+including restart-persistence and API-failure fallback tests.
 
 ## Run it
 
@@ -19,8 +22,18 @@ npm run dev                            # http://localhost:3000
 3. **Finding detail** — the remediation agent: classification → side-by-side hybrid diff →
    confidence meter (85% auto-approve threshold; the Java TLS finding is deliberately below it) →
    live equivalence tests → Approve / Escalate / Reject.
-4. **Dashboard** — "X of Y migrated", pass rate, migration history.
-5. **Certificate** — printable one-page compliance certificate (Print / Save as PDF).
+4. **Dashboard** — "X of Y migrated", quantum exposure score (0–100 with letter grade), pass rate,
+   migration history.
+5. **Certificate** — printable one-page compliance certificate with certificate ID (Print / Save as PDF).
+
+Product features beyond the core loop:
+- **Analyze all** — run the remediation agent across every finding in a scan at once, with live per-row status.
+- **Disk persistence** — scans, analyses, and review decisions survive server restarts (`.recrypt-data.json`).
+- **CBOM export** — download a CycloneDX-inspired JSON of any scan for the customer's own tooling.
+- **Patch artifacts** — download or copy the patched file straight from the finding view.
+- **Cryptographic evidence** — every equivalence test exposes the actual key/signature/ciphertext bytes
+  (hex excerpts) produced during the run, expandable in the UI.
+- **Engine stats & history** — files/patterns/duration per scan; recent scans listed on the home screen.
 
 ## What's real vs. what's demo scaffolding
 

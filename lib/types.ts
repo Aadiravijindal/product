@@ -7,6 +7,8 @@ export interface TestResult {
   passed: boolean;
   detail: string;
   real: boolean; // true when the check actually executed cryptography, false for static checks
+  /** raw cryptographic evidence (key/signature/ciphertext excerpts) produced during the test run */
+  evidence?: string;
 }
 
 export interface Classification {
@@ -53,6 +55,7 @@ export interface Scan {
   source: { type: 'repo'; repoId: string; repoName: string } | { type: 'snippet'; label: string };
   createdAt: string;
   findings: Finding[];
+  stats?: { files: number; patterns: number; durationMs: number };
 }
 
 export interface SampleRepoMeta {

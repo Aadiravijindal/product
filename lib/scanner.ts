@@ -196,6 +196,8 @@ const PATTERNS: Pattern[] = [
   },
 ];
 
+export const PATTERN_COUNT = PATTERNS.length;
+
 export function detectLanguage(filePath: string, code: string): string {
   const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
   const byExt: Record<string, string> = {

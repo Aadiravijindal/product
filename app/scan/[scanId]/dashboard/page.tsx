@@ -6,6 +6,23 @@ import Link from 'next/link';
 import { StatusBadge, TopBar } from '@/components/ui';
 import type { Scan } from '@/lib/types';
 
+/**
+ * Quantum exposure score: 100 = fully migrated. Unmigrated findings deduct by
+ * severity (Critical 30, High 18, Medium 8), floored at 4. Deterministic and
+ * explainable — the kind of number a CISO can put in a board slide.
+ */
+function exposureScore(scan: Scan): { score: number; grade: string; cls: string } {
+  const penalty: Record<string, number> = { Critical: 30, High: 18, Medium: 8 };
+  let score = 100;
+  for (const f of scan.findings) {
+    if (f.status !== 'migrated') score -= penalty[f.risk] ?? 8;
+  }
+  score = Math.max(4, score);
+  const grade = score >= 90 ? 'A' : score >= 75 ? 'B' : score >= 55 ? 'C' : score >= 35 ? 'D' : 'F';
+  const cls = score >= 90 ? 'score-good' : score >= 55 ? 'score-mid' : 'score-bad';
+  return { score, grade, cls };
+}
+
 function ProgressRing({ done, total }: { done: number; total: number }) {
   const r = 52;
   const c = 2 * Math.PI * r;
@@ -87,6 +104,17 @@ export default function Dashboard() {
           <div className="cap">crypto usages migrated to NIST post-quantum (hybrid)</div>
         </div>
         <div className="section">
+          {(() => {
+            const { score, grade, cls } = exposureScore(scan);
+            return (
+              <div className="stat-row score-row">
+                <span>Quantum exposure score</span>
+                <b className={cls}>
+                  {score}/100 <span className="score-grade">{grade}</span>
+                </b>
+              </div>
+            );
+          })()}
           <div className="stat-row"><span>Findings identified</span><b>{total}</b></div>
           <div className="stat-row"><span>Migrated (hybrid ML-DSA / ML-KEM)</span><b>{migrated.length}</b></div>
           <div className="stat-row"><span>Flagged for manual review / escalated</span><b>{escalated}</b></div>

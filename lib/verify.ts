@@ -23,6 +23,12 @@ function ms(t0: bigint): string {
   return (Number(process.hrtime.bigint() - t0) / 1e6).toFixed(2);
 }
 
+/** Hex excerpt of real cryptographic material produced during the test run. */
+function hexcerpt(label: string, buf: Uint8Array | Buffer): string {
+  const b = Buffer.from(buf);
+  return `${label} (${b.length} bytes): ${b.subarray(0, 24).toString('hex')}…${b.subarray(-8).toString('hex')}`;
+}
+
 function signingTests(): TestResult[] {
   const results: TestResult[] = [];
 
@@ -47,6 +53,7 @@ function signingTests(): TestResult[] {
       passed: ok,
       detail: `keygen + sign + verify in ${ms(t0)} ms · signature 256 bytes`,
       real: true,
+      evidence: hexcerpt('RSA-PSS signature', rsaSig),
     });
   }
 
@@ -76,6 +83,7 @@ function signingTests(): TestResult[] {
       passed: ok,
       detail: `real lattice signature via @noble/post-quantum · signature ${sig.length} bytes (vs 256 for RSA)`,
       real: true,
+      evidence: `${hexcerpt('ML-DSA-65 public key', keys.publicKey)}\n${hexcerpt('ML-DSA-65 signature', sig)}`,
     });
     results.push({
       name: 'Hybrid composite: tampered payload rejected by BOTH signatures',
@@ -112,6 +120,7 @@ function keyExchangeTests(): TestResult[] {
       passed: sA.equals(sB),
       detail: `completed in ${ms(t0)} ms · public key 65 bytes`,
       real: true,
+      evidence: hexcerpt('ECDH shared secret', sA),
     });
   }
 
@@ -127,6 +136,7 @@ function keyExchangeTests(): TestResult[] {
       passed: match,
       detail: `real lattice KEM via @noble/post-quantum · completed in ${ms(t0)} ms · ciphertext ${cipherText.length} bytes`,
       real: true,
+      evidence: `${hexcerpt('ML-KEM-768 ciphertext', cipherText)}\n${hexcerpt('shared secret', Buffer.from(clientSecret))}`,
     });
 
     const hkdfA = crypto.hkdfSync('sha256', Buffer.concat([Buffer.from(clientSecret), Buffer.from('ecdh')]), Buffer.alloc(0), 'hybrid-tls', 32);
