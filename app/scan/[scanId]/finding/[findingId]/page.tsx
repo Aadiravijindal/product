@@ -54,9 +54,19 @@ function AgentProgress({ live }: { live: boolean }) {
       </div>
       {live && (
         <div className="agent-note">
-          Live two-agent pipeline. Large files take ~1–2 minutes — if the reviewer
-          finds a flaw, the agent rewrites the patch and re-checks it. That extra
-          pass is normal and is exactly what makes the fix trustworthy.
+          {elapsed < 60 ? (
+            <>
+              Live two-agent pipeline. Large files take ~1–2 minutes — if the reviewer
+              finds a flaw, the agent rewrites the patch and re-checks it. That extra
+              pass is normal and is exactly what makes the fix trustworthy.
+            </>
+          ) : (
+            <>
+              Still working — the reviewer sent this one back for a rewrite, so the
+              agent is regenerating the full patch. This is the slow, valuable step.
+              Don&apos;t refresh; it will finish on its own.
+            </>
+          )}
         </div>
       )}
     </div>
@@ -79,15 +89,32 @@ export default function FindingDetail() {
   const analyze = useCallback(async () => {
     setPhase('analyzing');
     setError(null);
+    // Hard safety net: the full live pipeline (classify → generate → review →
+    // revise → prove) is bounded server-side, but never let the UI hang on a
+    // blank screen. If it exceeds 5 minutes, stop and offer Retry.
+    const controller = new AbortController();
+    const hardCap = setTimeout(() => controller.abort(), 300_000);
     try {
-      const res = await fetch(`/api/scan/${scanId}/findings/${findingId}/analyze`, { method: 'POST' });
+      const res = await fetch(`/api/scan/${scanId}/findings/${findingId}/analyze`, {
+        method: 'POST',
+        signal: controller.signal,
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'analysis failed');
       setFinding(data.finding);
       setPhase('ready');
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Analysis failed');
+      const aborted = e instanceof DOMException && e.name === 'AbortError';
+      setError(
+        aborted
+          ? 'The analysis ran past 5 minutes and was stopped — this usually means a very large file with a full revision round. Press Retry; it often completes on a second attempt.'
+          : e instanceof Error
+            ? e.message
+            : 'Analysis failed'
+      );
       setPhase('error');
+    } finally {
+      clearTimeout(hardCap);
     }
   }, [scanId, findingId]);
 

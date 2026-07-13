@@ -19,7 +19,10 @@ export function claudeAvailable(): boolean {
 
 let client: Anthropic | null = null;
 function getClient(): Anthropic {
-  if (!client) client = new Anthropic({ timeout: 60_000, maxRetries: 1 });
+  // Generous single-shot timeout: the revision round regenerates a whole file
+  // and can legitimately take ~60-100s on large inputs. maxRetries: 0 avoids
+  // stacking two timeouts back-to-back (which produced a long blank wait).
+  if (!client) client = new Anthropic({ timeout: 120_000, maxRetries: 0 });
   return client;
 }
 
