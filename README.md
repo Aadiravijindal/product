@@ -61,3 +61,26 @@ Product features beyond the core loop:
 - `lib/scanner.ts` — detection engine; `lib/verify.ts` — real equivalence tests;
   `lib/claude.ts` — live LLM calls; `lib/remediation.ts` — offline fallback patches
 - `app/api/*` — scan / analyze / action routes; `app/*` — the five screens
+
+## Verify it works (one command)
+
+After `npm run build`, run the built-in verification harness. It boots a
+server, runs 88 automated checks across the whole product (scanning,
+the assurance pipeline, real crypto proofs, migration plan, CBOM export,
+error handling), prints a pass/fail summary, and shuts the server down.
+
+```bash
+npm run build     # once
+npm run verify    # → "88 passed, 0 failed"
+```
+
+Other checks:
+
+```bash
+npm run smoke     # quick end-to-end check against an already-running server (localhost:3000)
+npm run typecheck # strict TypeScript, zero errors
+```
+
+`npm run verify` exits 0 on success and 1 on any failure, so it also works
+in CI. With `ANTHROPIC_API_KEY` set, it additionally exercises the live
+Claude two-agent pipeline; without it, the built-in engine is verified.
