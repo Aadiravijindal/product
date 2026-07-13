@@ -77,6 +77,7 @@ export default function Certificate() {
               <th>Algorithm before</th>
               <th>Algorithm after</th>
               <th>Equivalence tests</th>
+              <th>Proof digest</th>
               <th>Decision</th>
               <th>Reviewer</th>
             </tr>
@@ -91,6 +92,7 @@ export default function Certificate() {
                   <td>{f.algorithm}</td>
                   <td>{f.status === 'migrated' ? f.analysis?.newAlgorithm ?? '—' : '— (not migrated)'}</td>
                   <td>{t.length === 0 ? 'not run' : `${passed}/${t.length} passed`}</td>
+                  <td style={{ fontFamily: 'var(--mono)', fontSize: 10.5 }}>{f.analysis?.digest ? f.analysis.digest.slice(0, 16) + '…' : '—'}</td>
                   <td>
                     {f.status === 'migrated' ? 'Approved & migrated'
                       : f.status === 'escalated' ? 'Escalated for engineering review'
@@ -106,6 +108,10 @@ export default function Certificate() {
 
         <p className="cert-line">
           Reviewed and approved by: <b>{reviewers.length ? reviewers.join(', ') : '—'}</b>
+        </p>
+        <p className="cert-line">
+          Each migrated finding carries a SHA-256 proof digest over the original code, the applied patch, and the
+          executed test evidence. In the production version these digests are HSM-signed for third-party audit submission.
         </p>
         <p className="cert-line">
           Equivalence testing executed real cryptographic operations: classical RSA-PSS / ECDH via the platform crypto

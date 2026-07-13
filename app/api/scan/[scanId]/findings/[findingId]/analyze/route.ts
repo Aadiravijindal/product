@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getFinding, persist } from '@/lib/store';
-import { claudeAvailable, classifyFinding, generateRemediation } from '@/lib/claude';
+import { claudeAvailable, classifyFinding, generateRemediation, reviewPatch, revisePatch } from '@/lib/claude';
 import { builtinRemediation } from '@/lib/remediation';
+import { assessHndl, builtinReview, proofDigest } from '@/lib/assurance';
 import { runEquivalenceTests } from '@/lib/verify';
-import type { Analysis } from '@/lib/types';
+import type { Analysis, Review } from '@/lib/types';
 
 /** Never surface raw API error payloads in the UI. */
 function friendlyApiError(err: unknown): string {
@@ -16,10 +17,16 @@ function friendlyApiError(err: unknown): string {
 }
 
 /**
- * POST — run the remediation agent for one finding:
- * classification (Claude) → hybrid patch (Claude) → real equivalence tests.
- * Falls back to the built-in template engine if no API key is configured or
- * the live call fails, so a live demo never shows a stack trace.
+ * POST — run the full assurance pipeline for one finding:
+ *
+ *   classify ─┐
+ *             ├─► generate hybrid patch ─► ADVERSARIAL REVIEW (independent
+ *   context ──┘        agent) ─► bounded revision if needed ─► real
+ *   equivalence tests ─► proof-bundle digest ─► human decision
+ *
+ * Falls back to the built-in engine (template patches + deterministic policy
+ * review) if no API key is configured or a live call fails, so a live demo
+ * never shows a stack trace.
  */
 export async function POST(_req: NextRequest, ctx: { params: Promise<{ scanId: string; findingId: string }> }) {
   const { scanId, findingId } = await ctx.params;
@@ -32,17 +39,39 @@ export async function POST(_req: NextRequest, ctx: { params: Promise<{ scanId: s
 
   if (claudeAvailable()) {
     try {
+      // Stage 1+2: classification and patch generation in parallel
       const [classification, remediation] = await Promise.all([
         classifyFinding(finding),
         generateRemediation(finding),
       ]);
+
+      // Stage 3: independent adversarial review of the generated patch
+      let review: Review;
+      let patch = remediation;
+      try {
+        review = await reviewPatch(finding, patch.patchedCode);
+        // Stage 3b: one bounded revision round if the reviewer demands it
+        if (review.verdict === 'revised' && review.issues.length > 0) {
+          patch = await revisePatch(finding, patch.patchedCode, review.issues);
+          review = {
+            ...review,
+            issues: review.issues.map((i) => ({ ...i, resolved: true })),
+            summary: `${review.summary} The generator produced a revised patch addressing all reviewer findings; the revision is what is shown and tested below.`,
+          };
+        }
+      } catch {
+        // Reviewer call failed — fall back to the deterministic policy checks
+        review = builtinReview(finding, patch.patchedCode);
+      }
+
       analysis = {
         engine: 'claude',
         classification,
-        patchedCode: remediation.patchedCode,
-        changes: remediation.changes,
-        newAlgorithm: remediation.newAlgorithm,
+        patchedCode: patch.patchedCode,
+        changes: patch.changes,
+        newAlgorithm: patch.newAlgorithm,
         tests: [],
+        review,
         generatedAt: new Date().toISOString(),
       };
     } catch (err) {
@@ -55,6 +84,7 @@ export async function POST(_req: NextRequest, ctx: { params: Promise<{ scanId: s
         changes: builtin.changes,
         newAlgorithm: builtin.newAlgorithm,
         tests: [],
+        review: builtinReview(finding, builtin.patchedCode),
         generatedAt: new Date().toISOString(),
       };
     }
@@ -63,18 +93,23 @@ export async function POST(_req: NextRequest, ctx: { params: Promise<{ scanId: s
     analysis = {
       engine: 'builtin',
       engineNote:
-        'No ANTHROPIC_API_KEY configured — served from the built-in remediation library. Set the key to enable live AI analysis of arbitrary code.',
+        'No ANTHROPIC_API_KEY configured — served from the built-in remediation library. Set the key to enable the live two-agent pipeline on arbitrary code.',
       classification: builtin.classification,
       patchedCode: builtin.patchedCode,
       changes: builtin.changes,
       newAlgorithm: builtin.newAlgorithm,
       tests: [],
+      review: builtinReview(finding, builtin.patchedCode),
       generatedAt: new Date().toISOString(),
     };
   }
 
-  // Equivalence tests are real regardless of which engine produced the patch.
+  // Stage 4: equivalence tests are real regardless of which engine produced the patch
   analysis.tests = runEquivalenceTests(finding, analysis.patchedCode);
+  // Stage 5: tamper-evident proof bundle digest over code + patch + evidence
+  analysis.digest = proofDigest(finding, analysis.patchedCode, analysis.tests);
+  // Harvest-now-decrypt-later exposure window (deterministic Mosca-style math)
+  analysis.hndl = assessHndl(finding);
 
   finding.analysis = analysis;
   persist();

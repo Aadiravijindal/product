@@ -23,13 +23,14 @@ function downloadPatch(finding: Finding, patchedCode: string) {
 const AGENT_STEPS = [
   'Classifying algorithm, key size, and business context…',
   'Generating hybrid post-quantum patch (ML-DSA / ML-KEM)…',
-  'Running equivalence tests — real classical + post-quantum crypto…',
+  'Adversarial review — independent agent attacking the patch…',
+  'Equivalence tests + proof bundle — real FIPS 203/204 crypto…',
 ];
 
 function AgentProgress() {
   const [step, setStep] = useState(0);
   useEffect(() => {
-    const t = setInterval(() => setStep((s) => Math.min(s + 1, AGENT_STEPS.length - 1)), 1600);
+    const t = setInterval(() => setStep((s) => Math.min(s + 1, AGENT_STEPS.length - 1)), 2600);
     return () => clearInterval(t);
   }, []);
   return (
@@ -55,6 +56,10 @@ export default function FindingDetail() {
   const [error, setError] = useState<string | null>(null);
   const [acting, setActing] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [claudeLive, setClaudeLive] = useState(false);
+  const [question, setQuestion] = useState('');
+  const [qa, setQa] = useState<{ q: string; a: string }[]>([]);
+  const [asking, setAsking] = useState(false);
 
   const analyze = useCallback(async () => {
     setPhase('analyzing');
@@ -72,6 +77,7 @@ export default function FindingDetail() {
   }, [scanId, findingId]);
 
   useEffect(() => {
+    fetch('/api/repos').then((r) => r.json()).then((d) => setClaudeLive(Boolean(d.claude))).catch(() => {});
     fetch(`/api/scan/${scanId}`)
       .then(async (r) => {
         const d = await r.json();
@@ -99,6 +105,25 @@ export default function FindingDetail() {
       setCopied(true);
       setTimeout(() => setCopied(false), 1800);
     } catch { /* clipboard unavailable (non-secure context) */ }
+  };
+
+  const ask = async () => {
+    const q = question.trim();
+    if (!q || asking) return;
+    setAsking(true);
+    setQuestion('');
+    try {
+      const res = await fetch(`/api/scan/${scanId}/findings/${findingId}/ask`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: q }),
+      });
+      const data = await res.json();
+      setQa((prev) => [...prev, { q, a: res.ok ? data.answer : data.error || 'The agent could not answer — retry.' }]);
+    } catch {
+      setQa((prev) => [...prev, { q, a: 'The agent could not answer — retry.' }]);
+    }
+    setAsking(false);
   };
 
   const act = async (action: 'approve' | 'reject' | 'escalate') => {
@@ -173,6 +198,12 @@ export default function FindingDetail() {
           <div>Usage<b>{usageLabel(a.classification.usage_type)}</b></div>
           <div>Proposed replacement<b>{a.newAlgorithm}</b></div>
         </div>
+        {a.hndl && (
+          <div className={`hndl ${a.hndl.urgent ? 'hndl-urgent' : ''}`}>
+            <span className="hndl-label">{a.hndl.urgent ? '⏱ ' : '📅 '}{a.hndl.label}</span>
+            <span className="hndl-detail">{a.hndl.detail}</span>
+          </div>
+        )}
       </div>
 
       <div className="section">
@@ -208,6 +239,36 @@ export default function FindingDetail() {
         </ul>
       </div>
 
+      {a.review && (
+        <div className="section">
+          <h2>
+            Independent security review
+            <span className={`badge verdict-${a.review.verdict}`}>
+              {a.review.verdict === 'approved' ? 'Approved' : a.review.verdict === 'approved_with_notes' ? 'Approved with notes' : 'Revised after review'}
+            </span>
+            <span className="engine-tag">
+              {a.review.engine === 'claude'
+                ? 'adversarial reviewer: separate Claude agent (did not write the patch)'
+                : `policy checklist: ${a.review.checksRun} static checks`}
+            </span>
+          </h2>
+          <p className="explain" style={{ fontSize: 14 }}>{a.review.summary}</p>
+          {a.review.issues.length > 0 && (
+            <div style={{ marginTop: 10 }}>
+              {a.review.issues.map((iss, i) => (
+                <div className="review-issue" key={i}>
+                  <span className={`badge sev-${iss.severity}`}>{iss.severity}</span>
+                  <span>
+                    <b>{iss.title}</b>{iss.resolved ? ' — resolved in the revised patch ✓' : ''}
+                    <span className="test-detail">{iss.detail}</span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="section">
         <h2>Confidence</h2>
         <div className="meter-outer">
@@ -226,6 +287,12 @@ export default function FindingDetail() {
           Equivalence tests
           <span className="engine-tag">executed live on this host — real RSA/ECDH + real FIPS 203/204</span>
         </h2>
+        {a.digest && (
+          <div className="digest-line">
+            Proof bundle SHA-256 <span title="Hash over original code + patch + test evidence. In production this digest is HSM-signed for third-party audit.">ⓘ</span>:{' '}
+            <code>{a.digest}</code>
+          </div>
+        )}
         {a.tests.map((t, i) => (
           <div className="test-line" key={i}>
             <span className={`test-ico ${t.passed ? 'pass' : 'fail'}`}>{t.passed ? '✓' : '✗'}</span>
@@ -242,6 +309,30 @@ export default function FindingDetail() {
           </div>
         ))}
       </div>
+
+      {claudeLive && (
+        <div className="section">
+          <h2>Ask the agent<span className="engine-tag">live — grounded in this finding&apos;s code and patch</span></h2>
+          {qa.map((x, i) => (
+            <div key={i} className="qa-pair">
+              <div className="qa-q">{x.q}</div>
+              <div className="qa-a">{x.a}</div>
+            </div>
+          ))}
+          {asking && <div className="qa-a qa-thinking">Thinking…</div>}
+          <div style={{ display: 'flex', gap: 10, marginTop: qa.length ? 12 : 0 }}>
+            <input
+              className="text-input"
+              style={{ flex: 1 }}
+              placeholder={'e.g. "Why hybrid instead of pure ML-DSA?" or "What breaks for our downstream verifiers?"'}
+              value={question}
+              onChange={(e) => setQuestion(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') void ask(); }}
+            />
+            <button className="btn" disabled={asking || question.trim().length === 0} onClick={() => void ask()}>Ask</button>
+          </div>
+        </div>
+      )}
 
       <div className="action-bar">
         <button

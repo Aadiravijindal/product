@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { StatusBadge, TopBar } from '@/components/ui';
-import type { Scan } from '@/lib/types';
+import type { MigrationPlan, Scan } from '@/lib/types';
 
 /**
  * Quantum exposure score: 100 = fully migrated. Unmigrated findings deduct by
@@ -47,6 +47,9 @@ export default function Dashboard() {
   const { scanId } = useParams<{ scanId: string }>();
   const [scan, setScan] = useState<Scan | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [plan, setPlan] = useState<MigrationPlan | null>(null);
+  const [planning, setPlanning] = useState(false);
+  const [planError, setPlanError] = useState<string | null>(null);
 
   useEffect(() => {
     fetch(`/api/scan/${scanId}`)
@@ -54,9 +57,24 @@ export default function Dashboard() {
         const d = await r.json();
         if (!r.ok) throw new Error(d.error || 'not found');
         setScan(d.scan);
+        if (d.scan.plan) setPlan(d.scan.plan);
       })
       .catch((e) => setError(e.message));
   }, [scanId]);
+
+  const generatePlan = async () => {
+    setPlanning(true);
+    setPlanError(null);
+    try {
+      const res = await fetch(`/api/scan/${scanId}/plan`, { method: 'POST' });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'plan generation failed');
+      setPlan(d.plan);
+    } catch (e) {
+      setPlanError(e instanceof Error ? e.message : 'Plan generation failed — retry.');
+    }
+    setPlanning(false);
+  };
 
   if (error) {
     return (
@@ -130,6 +148,46 @@ export default function Dashboard() {
             <Link className="btn" href={`/scan/${scan.id}`}>Back to findings</Link>
           </div>
         </div>
+      </div>
+
+      <div className="section">
+        <h2>
+          Migration plan
+          {plan && (
+            <span className="engine-tag">
+              {plan.engine === 'claude' ? 'planner: Claude API (live), dependency-aware' : 'planner: built-in sequencing rules'}
+            </span>
+          )}
+        </h2>
+        {planError && <div className="notice">{planError}</div>}
+        {!plan ? (
+          <div>
+            <p className="sub" style={{ margin: '0 0 14px' }}>
+              One agent pass over every finding produces an ordered rollout: key exchange first (harvest-now-decrypt-later),
+              externally-verified signatures second (counterparty coordination), tokens last (verifier fan-out).
+            </p>
+            <button className="btn btn-primary" disabled={planning} onClick={() => void generatePlan()}>
+              {planning ? 'Planning…' : 'Generate migration plan'}
+            </button>
+          </div>
+        ) : (
+          <div>
+            <p className="explain" style={{ fontSize: 14, marginBottom: 14 }}>{plan.summary}</p>
+            {plan.steps.map((step) => (
+              <div className="plan-step" key={step.order}>
+                <div className="plan-num">{step.order}</div>
+                <div>
+                  <b>{step.title}</b>
+                  <div className="plan-detail">{step.detail}</div>
+                  {step.files.length > 0 && (
+                    <div className="plan-files">{step.files.join(' · ')}</div>
+                  )}
+                  {step.coordination && <div className="plan-coord">⚠ {step.coordination}</div>}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="section">

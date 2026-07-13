@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import type { Classification, Finding } from './types';
+import type { Classification, Finding, Review, ReviewIssue, Scan } from './types';
 
 /**
  * Live LLM calls for classification and patch generation.
@@ -114,4 +114,202 @@ Return the FULL patched file content, a short list of what changed, and a short 
     new_algorithm: string;
   };
   return { patchedCode: parsed.patched_code, changes: parsed.changes, newAlgorithm: parsed.new_algorithm };
+}
+
+// ---------------------------------------------------------------------------
+// Adversarial patch review — a SEPARATE agent context whose only job is to
+// attack the generator's patch. This is the core of the assurance pipeline.
+// ---------------------------------------------------------------------------
+
+export async function reviewPatch(finding: Finding, patchedCode: string): Promise<Review> {
+  const response = await getClient().beta.messages.create({
+    model: MODEL,
+    max_tokens: 3072,
+    betas: BETAS,
+    system:
+      'You are an adversarial cryptography security reviewer. You did NOT write the patch you are reviewing; your only job is to find real flaws in it before it reaches production at a bank. Be rigorous but do not invent problems.',
+    messages: [
+      {
+        role: 'user',
+        content: `A code-migration agent proposed this hybrid post-quantum patch. Attack it.
+
+ORIGINAL (${finding.file}, ${finding.language}):
+${finding.fullCode}
+
+PROPOSED PATCH:
+${patchedCode}
+
+Look specifically for: downgrade paths (legacy protocol versions or cipher suites still enabled), missing dual-verification (verifier not requiring BOTH classical and post-quantum results during the hybrid window), private key material logged/returned/exposed, breaking changes to the callable surface, incorrect algorithm parameters or library usage, and backward-compatibility breaks with existing counterparties. Report only real, defensible findings with severity high/medium/low. If the patch is sound, say so.`,
+      },
+    ],
+    output_format: {
+      type: 'json_schema',
+      schema: {
+        type: 'object',
+        properties: {
+          verdict: { type: 'string', enum: ['approved', 'approved_with_notes', 'needs_revision'] },
+          summary: { type: 'string' },
+          issues: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                severity: { type: 'string', enum: ['high', 'medium', 'low'] },
+                title: { type: 'string' },
+                detail: { type: 'string' },
+              },
+              required: ['severity', 'title', 'detail'],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ['verdict', 'summary', 'issues'],
+        additionalProperties: false,
+      },
+    },
+  });
+  const parsed = JSON.parse(firstText(response)) as {
+    verdict: 'approved' | 'approved_with_notes' | 'needs_revision';
+    summary: string;
+    issues: ReviewIssue[];
+  };
+  return {
+    engine: 'claude',
+    verdict: parsed.verdict === 'needs_revision' ? 'revised' : parsed.verdict,
+    summary: parsed.summary,
+    issues: parsed.issues,
+    checksRun: 6,
+  };
+}
+
+/** One bounded revision round: regenerate the patch with the reviewer's findings attached. */
+export async function revisePatch(finding: Finding, patchedCode: string, issues: ReviewIssue[]): Promise<RemediationResult> {
+  const response = await getClient().beta.messages.create({
+    model: MODEL,
+    max_tokens: 8192,
+    betas: BETAS,
+    system:
+      'You are a cryptography migration assistant. Fix the specific reviewer findings in your patch without rewriting unrelated code.',
+    messages: [
+      {
+        role: 'user',
+        content: `Your hybrid post-quantum patch for ${finding.file} was reviewed by an independent security reviewer who found these issues:
+
+${issues.map((i) => `- [${i.severity}] ${i.title}: ${i.detail}`).join('\n')}
+
+ORIGINAL FILE:
+${finding.fullCode}
+
+YOUR PREVIOUS PATCH:
+${patchedCode}
+
+Produce a corrected FULL patched file that resolves every issue while keeping the hybrid (classical + NIST post-quantum) approach and the original callable surface. Also return the updated change list and algorithm label.`,
+      },
+    ],
+    output_format: {
+      type: 'json_schema',
+      schema: {
+        type: 'object',
+        properties: {
+          patched_code: { type: 'string' },
+          changes: { type: 'array', items: { type: 'string' } },
+          new_algorithm: { type: 'string' },
+        },
+        required: ['patched_code', 'changes', 'new_algorithm'],
+        additionalProperties: false,
+      },
+    },
+  });
+  const parsed = JSON.parse(firstText(response)) as { patched_code: string; changes: string[]; new_algorithm: string };
+  return { patchedCode: parsed.patched_code, changes: parsed.changes, newAlgorithm: parsed.new_algorithm };
+}
+
+// ---------------------------------------------------------------------------
+// Migration plan — one agent pass over the whole scan
+// ---------------------------------------------------------------------------
+
+export async function generatePlanLive(scan: Scan): Promise<{ summary: string; steps: { order: number; title: string; detail: string; files: string[]; coordination?: string }[] }> {
+  const findingsBrief = scan.findings
+    .map(
+      (f) =>
+        `- ${f.file} (lines ${f.lineStart}-${f.lineEnd}): ${f.algorithm}, ${f.usageType}, risk ${f.risk}, status ${f.status}\n  context excerpt:\n${f.snippet
+          .split('\n')
+          .slice(0, 12)
+          .join('\n')}`
+    )
+    .join('\n\n');
+  const response = await getClient().beta.messages.create({
+    model: MODEL,
+    max_tokens: 4096,
+    betas: BETAS,
+    system:
+      'You are a post-quantum migration planner for enterprise engineering leadership. Produce concrete, dependency-aware rollout plans. Key exchange migrates first (harvest-now-decrypt-later); externally-verified signatures need counterparty coordination; tokens need all verifiers updated before enforcement.',
+    messages: [
+      {
+        role: 'user',
+        content: `Create an ordered migration plan for this codebase scan. Findings:
+
+${findingsBrief}
+
+Return 3-6 steps. Each step: a title, a 2-3 sentence rationale an engineering leader can act on, the affected files, and an optional coordination warning (external parties, re-certification, verifier rollout ordering) when the code context implies one.`,
+      },
+    ],
+    output_format: {
+      type: 'json_schema',
+      schema: {
+        type: 'object',
+        properties: {
+          summary: { type: 'string' },
+          steps: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                order: { type: 'integer' },
+                title: { type: 'string' },
+                detail: { type: 'string' },
+                files: { type: 'array', items: { type: 'string' } },
+                coordination: { type: 'string' },
+              },
+              required: ['order', 'title', 'detail', 'files'],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ['summary', 'steps'],
+        additionalProperties: false,
+      },
+    },
+  });
+  return JSON.parse(firstText(response));
+}
+
+// ---------------------------------------------------------------------------
+// Ask-the-agent — live Q&A grounded in one finding
+// ---------------------------------------------------------------------------
+
+export async function askAgent(finding: Finding, question: string): Promise<string> {
+  const a = finding.analysis;
+  const response = await getClient().beta.messages.create({
+    model: MODEL,
+    max_tokens: 1024,
+    betas: BETAS,
+    system:
+      'You are the Recrypt migration agent answering a security-conscious engineering leader during a review. Answer only from the provided finding context and established post-quantum cryptography facts (NIST FIPS 203/204/205, hybrid/composite patterns, CNSA 2.0 timelines). Be direct, under 150 words, no headers or bullet lists unless asked.',
+    messages: [
+      {
+        role: 'user',
+        content: `FINDING CONTEXT
+File: ${finding.file} · ${finding.algorithm} · ${finding.usageType} · risk ${finding.risk} · confidence ${finding.confidence}%
+
+ORIGINAL CODE:
+${finding.fullCode.slice(0, 6000)}
+
+${a ? `PROPOSED PATCH (${a.newAlgorithm}):\n${a.patchedCode.slice(0, 6000)}\n\nCHANGES: ${a.changes.join('; ')}` : 'No patch generated yet.'}
+
+QUESTION: ${question.slice(0, 500)}`,
+      },
+    ],
+  });
+  return firstText(response);
 }

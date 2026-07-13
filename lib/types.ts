@@ -18,6 +18,27 @@ export interface Classification {
   explanation: string;
 }
 
+export interface ReviewIssue {
+  severity: 'high' | 'medium' | 'low';
+  title: string;
+  detail: string;
+  resolved?: boolean;
+}
+
+export interface Review {
+  engine: 'claude' | 'builtin';
+  verdict: 'approved' | 'approved_with_notes' | 'revised';
+  summary: string;
+  issues: ReviewIssue[];
+  checksRun: number;
+}
+
+export interface HndlAssessment {
+  label: string;   // e.g. "Migrate by 2028" or "Already exposed"
+  detail: string;  // the Mosca-style reasoning, one sentence
+  urgent: boolean;
+}
+
 export interface Analysis {
   engine: 'claude' | 'builtin';
   engineNote?: string;
@@ -26,6 +47,27 @@ export interface Analysis {
   changes: string[];
   newAlgorithm: string;
   tests: TestResult[];
+  /** independent adversarial review of the generated patch */
+  review?: Review;
+  /** SHA-256 over original code + patch + test evidence — the tamper-evident proof bundle */
+  digest?: string;
+  /** harvest-now-decrypt-later exposure window (Mosca-style) */
+  hndl?: HndlAssessment;
+  generatedAt: string;
+}
+
+export interface PlanStep {
+  order: number;
+  title: string;
+  detail: string;
+  files: string[];
+  coordination?: string;
+}
+
+export interface MigrationPlan {
+  engine: 'claude' | 'builtin';
+  summary: string;
+  steps: PlanStep[];
   generatedAt: string;
 }
 
@@ -56,6 +98,7 @@ export interface Scan {
   createdAt: string;
   findings: Finding[];
   stats?: { files: number; patterns: number; durationMs: number };
+  plan?: MigrationPlan;
 }
 
 export interface SampleRepoMeta {
