@@ -84,3 +84,18 @@ npm run typecheck # strict TypeScript, zero errors
 `npm run verify` exits 0 on success and 1 on any failure, so it also works
 in CI. With `ANTHROPIC_API_KEY` set, it additionally exercises the live
 Claude two-agent pipeline; without it, the built-in engine is verified.
+
+## Set your API key once (no more re-typing)
+
+Create a file called `.env.local` in the project root with your key:
+
+```bash
+echo 'ANTHROPIC_API_KEY=sk-ant-your-real-key' > .env.local
+```
+
+That's it. `npm run dev` and `npm start` read it automatically — you never
+export the key again. `.env.local` is gitignored, so it can never be committed
+or pushed. (Copy `.env.example` if you prefer a template.)
+
+**Never hardcode a key into source files** — committed keys leak the moment
+they hit GitHub and get drained by bots. `.env.local` avoids that entirely.
