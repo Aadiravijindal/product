@@ -23,20 +23,28 @@ function downloadPatch(finding: Finding, patchedCode: string) {
 const AGENT_STEPS = [
   'Classifying algorithm, key size, and business context…',
   'Generating hybrid post-quantum patch (ML-DSA / ML-KEM)…',
-  'Adversarial review — independent agent attacking the patch…',
-  'Equivalence tests + proof bundle — real FIPS 203/204 crypto…',
+  'Adversarial review — a second agent attacks the patch…',
+  'Revising if the reviewer found issues, then running real crypto proofs…',
 ];
 
-function AgentProgress() {
+function AgentProgress({ live }: { live: boolean }) {
   const [step, setStep] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
   useEffect(() => {
-    const t = setInterval(() => setStep((s) => Math.min(s + 1, AGENT_STEPS.length - 1)), 2600);
-    return () => clearInterval(t);
-  }, []);
+    // Pace the visible steps across the expected live-pipeline duration; the
+    // last step deliberately dwells (that's where the review + optional
+    // revision round happens — the longest, most valuable part).
+    const stepMs = live ? 7000 : 900;
+    const s = setInterval(() => setStep((x) => Math.min(x + 1, AGENT_STEPS.length - 1)), stepMs);
+    const e = setInterval(() => setElapsed((x) => x + 1), 1000);
+    return () => { clearInterval(s); clearInterval(e); };
+  }, [live]);
   return (
     <div className="loading-panel">
       <div className="spinner" />
-      <div style={{ fontSize: 16, marginBottom: 14 }}>Remediation agent working…</div>
+      <div style={{ fontSize: 16, marginBottom: 14 }}>
+        Remediation agent working… <span className="agent-timer">{elapsed}s</span>
+      </div>
       <div className="agent-steps">
         {AGENT_STEPS.map((s, i) => (
           <div key={i} className={`agent-step ${i < step ? 'done' : i === step ? 'now' : ''}`}>
@@ -44,6 +52,13 @@ function AgentProgress() {
           </div>
         ))}
       </div>
+      {live && (
+        <div className="agent-note">
+          Live two-agent pipeline. Large files take ~1–2 minutes — if the reviewer
+          finds a flaw, the agent rewrites the patch and re-checks it. That extra
+          pass is normal and is exactly what makes the fix trustworthy.
+        </div>
+      )}
     </div>
   );
 }
@@ -160,7 +175,7 @@ export default function FindingDetail() {
     return (
       <div className="shell">
         <TopBar scanId={scanId} />
-        <AgentProgress />
+        <AgentProgress live={claudeLive} />
       </div>
     );
   }
@@ -308,6 +323,11 @@ export default function FindingDetail() {
             </span>
           </div>
         ))}
+        <p className="tests-scope">
+          These checks execute the real NIST ML-DSA-65 / ML-KEM-768 algorithms and confirm the
+          patched function surface is unchanged, so no caller breaks. Compiling the generated patch
+          into your own build and test suite is the final production step.
+        </p>
       </div>
 
       {claudeLive && (

@@ -258,6 +258,16 @@ ul.changes li { margin-bottom: 5px; }
 .agent-step.now { color: var(--text); }
 .agent-step.done { color: var(--accent); }
 .agent-step-ico { display: inline-block; width: 16px; }
+.agent-timer { color: var(--faint); font-family: var(--mono); font-size: 13px; }
+.agent-note {
+  max-width: 440px; margin: 22px auto 0; padding: 12px 16px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  color: var(--muted); font-size: 12.5px; line-height: 1.55; text-align: left;
+}
+.tests-scope {
+  margin: 14px 0 0; padding-top: 12px; border-top: 1px solid var(--border);
+  color: var(--faint); font-size: 12.5px; line-height: 1.55;
+}
 
 /* ---- dashboard ---- */
 .dash-grid { display: grid; grid-template-columns: 300px 1fr; gap: 18px; margin-bottom: 18px; }
