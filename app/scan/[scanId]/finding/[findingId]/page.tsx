@@ -59,17 +59,19 @@ function AgentProgress({ live }: { live: boolean }) {
       </div>
       {live && (
         <div className="agent-note">
-          {elapsed < 60 ? (
+          {elapsed < 75 ? (
             <>
-              Live two-agent pipeline. Large files take ~1–2 minutes — if the reviewer
-              finds a flaw, the agent rewrites the patch and re-checks it. That extra
-              pass is normal and is exactly what makes the fix trustworthy.
+              Live red-team vs blue-team pipeline. Each attack round takes ~1 minute —
+              when the attacker finds a flaw, the generator rewrites the patch and gets
+              attacked again. 2–4 minutes on large files is normal and is exactly what
+              makes the fix trustworthy.
             </>
           ) : (
             <>
-              Still working — the reviewer sent this one back for a rewrite, so the
-              agent is regenerating the full patch. This is the slow, valuable step.
-              Don&apos;t refresh; it will finish on its own.
+              Still fighting — the attacker found flaws, so the generator is rewriting
+              the patch for another round. The loop is time-budgeted and will finish on
+              its own; don&apos;t refresh. Every round it survives is shown in the
+              review below.
             </>
           )}
         </div>

@@ -4,7 +4,13 @@ import { claudeAvailable, classifyFinding, generateRemediation, hardenPatchLive 
 import { builtinRemediation } from '@/lib/remediation';
 import { assessHndl, builtinReview, proofDigest } from '@/lib/assurance';
 import { runEquivalenceTests } from '@/lib/verify';
-import type { Analysis, Review } from '@/lib/types';
+import type { Analysis, Finding, Review } from '@/lib/types';
+
+/**
+ * Vercel: allow this function to run the full live pipeline (multi-round
+ * adversarial loop can take a few minutes). Ignored by plain `next start`.
+ */
+export const maxDuration = 300;
 
 /** Never surface raw API error payloads in the UI. */
 function friendlyApiError(err: unknown): string {
@@ -28,6 +34,13 @@ function friendlyApiError(err: unknown): string {
  * review) if no API key is configured or a live call fails, so a live demo
  * never shows a stack trace.
  */
+/**
+ * In-flight de-duplication: if the browser times out and the user hits Retry
+ * while the first (long) live pipeline is still running on this instance, the
+ * retry JOINS the existing run instead of starting a second expensive one.
+ */
+const inFlight = new Map<string, Promise<Analysis>>();
+
 export async function POST(_req: NextRequest, ctx: { params: Promise<{ scanId: string; findingId: string }> }) {
   const { scanId, findingId } = await ctx.params;
   const scan = await getScan(scanId);
@@ -36,6 +49,27 @@ export async function POST(_req: NextRequest, ctx: { params: Promise<{ scanId: s
 
   if (finding.analysis) return NextResponse.json({ finding });
 
+  const flightKey = `${scanId}/${findingId}`;
+  const existing = inFlight.get(flightKey);
+  if (existing) {
+    const analysis = await existing;
+    finding.analysis = analysis;
+    return NextResponse.json({ finding });
+  }
+
+  const run = analyzeFinding(finding);
+  inFlight.set(flightKey, run);
+  try {
+    const analysis = await run;
+    finding.analysis = analysis;
+    await saveScan(scan);
+    return NextResponse.json({ finding });
+  } finally {
+    inFlight.delete(flightKey);
+  }
+}
+
+async function analyzeFinding(finding: Finding): Promise<Analysis> {
   let analysis: Analysis;
 
   if (claudeAvailable()) {
@@ -106,7 +140,5 @@ export async function POST(_req: NextRequest, ctx: { params: Promise<{ scanId: s
   // Harvest-now-decrypt-later exposure window (deterministic Mosca-style math)
   analysis.hndl = assessHndl(finding);
 
-  finding.analysis = analysis;
-  await saveScan(scan);
-  return NextResponse.json({ finding });
+  return analysis;
 }

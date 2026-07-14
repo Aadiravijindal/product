@@ -238,6 +238,15 @@ Produce a corrected FULL patched file that resolves every issue while keeping th
 // ---------------------------------------------------------------------------
 
 const MAX_ROUNDS = 3;
+// Wall-clock budget for the hardening loop, measured from the first attack.
+// A single review or revision can take 60-90s on large files; without a
+// budget, 3 full rounds can blow past the client's 300s cap and the user
+// stares at a spinner. The rule: after each revision, another attack round
+// only STARTS if we're still inside the budget. The revision itself always
+// completes, so reported flaws are never left unfixed — at worst the final
+// re-attack is skipped and the patch is routed to human review instead of
+// being auto-approved.
+const TIME_BUDGET_MS = 120_000;
 
 export async function hardenPatchLive(
   finding: Finding,
@@ -245,6 +254,8 @@ export async function hardenPatchLive(
 ): Promise<{ patch: RemediationResult; review: Review }> {
   let patch = initial;
   const rounds: ReviewRound[] = [];
+  const t0 = Date.now();
+  let unverifiedFinalRevision = false;
 
   for (let i = 1; i <= MAX_ROUNDS; i++) {
     const review = await reviewPatch(finding, patch.patchedCode);
@@ -259,21 +270,34 @@ export async function hardenPatchLive(
     // Converged: the attacker approves, or found nothing actionable to revise.
     if (review.verdict !== 'revised' || review.issues.length === 0) break;
 
-    // Still flawed and we have budget left → generator rewrites and we re-attack.
-    if (i < MAX_ROUNDS) {
-      patch = await revisePatch(finding, patch.patchedCode, review.issues);
+    // Round cap reached: leave the issues visibly unresolved for a human.
+    if (i === MAX_ROUNDS) break;
+
+    // Generator rewrites to close the reported flaws.
+    patch = await revisePatch(finding, patch.patchedCode, review.issues);
+    rounds[rounds.length - 1] = {
+      ...rounds[rounds.length - 1],
+      issues: review.issues.map((iss) => ({ ...iss, resolved: true })),
+    };
+
+    // Budget gate: only start another attack round if it can fit.
+    if (Date.now() - t0 > TIME_BUDGET_MS) {
+      unverifiedFinalRevision = true;
+      break;
     }
   }
 
   const last = rounds[rounds.length - 1];
-  const converged = last.verdict !== 'revised' || last.issueCount === 0;
+  const converged = !unverifiedFinalRevision && (last.verdict !== 'revised' || last.issueCount === 0);
   const totalFound = rounds.reduce((n, r) => n + r.issueCount, 0);
 
-  const summary = converged
-    ? rounds.length === 1
-      ? 'An independent red-team agent attacked the patch and found no defensible flaws on the first pass.'
-      : `An independent red-team agent attacked the patch over ${rounds.length} rounds. It surfaced ${totalFound} flaw${totalFound === 1 ? '' : 's'}; the generator rewrote the patch after each round until the reviewer could no longer break it.`
-    : `After ${MAX_ROUNDS} hardening rounds, ${last.issueCount} issue${last.issueCount === 1 ? '' : 's'} remained unresolved — this finding is flagged for a human engineer rather than auto-approved.`;
+  const summary = unverifiedFinalRevision
+    ? `The red-team agent ran ${rounds.length} attack round${rounds.length === 1 ? '' : 's'} inside the time budget, surfacing ${totalFound} flaw${totalFound === 1 ? '' : 's'}, and the generator rewrote the patch after each round. The final rewrite was not re-attacked (time budget), so this patch is routed to human review rather than auto-approved.`
+    : converged
+      ? rounds.length === 1
+        ? 'An independent red-team agent attacked the patch and found no defensible flaws on the first pass.'
+        : `An independent red-team agent attacked the patch over ${rounds.length} rounds. It surfaced ${totalFound} flaw${totalFound === 1 ? '' : 's'}; the generator rewrote the patch after each round until the reviewer could no longer break it.`
+      : `After ${MAX_ROUNDS} hardening rounds, ${last.issueCount} issue${last.issueCount === 1 ? '' : 's'} remained unresolved — this finding is flagged for a human engineer rather than auto-approved.`;
 
   return {
     patch,

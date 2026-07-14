@@ -3,6 +3,9 @@ import { getScan, saveScan } from '@/lib/store';
 import { claudeAvailable, generatePlanLive } from '@/lib/claude';
 import { builtinPlan } from '@/lib/assurance';
 
+/** Vercel: the live plan call can exceed the default function timeout. */
+export const maxDuration = 120;
+
 /** POST — generate (or return the cached) dependency-aware migration plan for a scan. */
 export async function POST(_req: NextRequest, ctx: { params: Promise<{ scanId: string }> }) {
   const { scanId } = await ctx.params;
