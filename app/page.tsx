@@ -76,6 +76,19 @@ export default function Home() {
         )}
       </p>
 
+      <div className="final-product-cta">
+        <div>
+          <div className="fp-title">⬡ The final product — Enterprise Console</div>
+          <div className="fp-sub">
+            The org-wide platform this demo grows into: continuous fleet scanning, overnight fix
+            runs, the crypto policy gate, and the auditor-grade trail. Owner sign-in.
+          </div>
+        </div>
+        <button className="btn btn-primary" onClick={() => router.push('/platform')}>
+          Final product →
+        </button>
+      </div>
+
       {error && <div className="notice">{error}</div>}
       {claude === false && (
         <div className="notice">

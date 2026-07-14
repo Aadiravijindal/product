@@ -85,6 +85,30 @@ npm run typecheck # strict TypeScript, zero errors
 in CI. With `ANTHROPIC_API_KEY` set, it additionally exercises the live
 Claude two-agent pipeline; without it, the built-in engine is verified.
 
+## The Enterprise Console ("Final product")
+
+The **Final product →** button on the home screen opens the Enterprise Console —
+the org-wide platform the demo grows into: fleet dashboard (exposure score,
+risk by team, 8-quarter trend), 24 repositories under continuous scan,
+overnight fix-run records, the crypto policy gate with CISO exceptions, and
+the audit trail. The three connected sample repos run the real pipeline from
+inside the console; the wider fleet is a clearly-labeled representative
+simulation.
+
+Owner sign-in is required. Set the passcode via environment variable — never
+in source:
+
+```bash
+# locally: add to .env.local
+PLATFORM_PASSCODE=your-passcode
+# optionally override the owner email (defaults to the repo owner's)
+PLATFORM_EMAIL=you@example.com
+```
+
+On Vercel: Settings → Environment Variables → add `PLATFORM_PASSCODE` → redeploy.
+Without the env var the passcode defaults to `recrypt-preview` (dev only — set
+a real one before sharing the link).
+
 ## Set your API key once (no more re-typing)
 
 Create a file called `.env.local` in the project root with your key:
