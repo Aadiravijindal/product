@@ -83,13 +83,13 @@ Product features beyond the core loop:
 ## Verify it works (one command)
 
 After `npm run build`, run the built-in verification harness. It boots a
-server, runs 164 automated checks across the whole product (scanning,
+server, runs 213 automated checks across the whole product (scanning,
 the assurance pipeline, real crypto proofs, migration plan, CBOM export,
 error handling), prints a pass/fail summary, and shuts the server down.
 
 ```bash
 npm run build     # once
-npm run verify    # → "164 passed, 0 failed"
+npm run verify    # → "213 passed, 0 failed"
 ```
 
 Other checks:
