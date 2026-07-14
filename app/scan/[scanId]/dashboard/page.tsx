@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { StatusBadge, TopBar } from '@/components/ui';
+import { buildComplianceReport } from '@/lib/compliance';
 import type { MigrationPlan, Scan } from '@/lib/types';
 
 /**
@@ -149,6 +150,39 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {(() => {
+        const report = buildComplianceReport(scan);
+        if (report.frameworks.length === 0) return null;
+        return (
+          <div className="section">
+            <h2>
+              Compliance readiness
+              <span className="engine-tag">mapped to the controls each finding touches</span>
+            </h2>
+            <p className="sub" style={{ margin: '0 0 14px' }}>
+              Every finding mapped to the framework it puts at risk — the evidence your auditor, board, or a customer
+              security review actually asks for.
+            </p>
+            <div className="compliance-grid">
+              {report.frameworks.map((fw) => (
+                <div className={`compliance-card ${fw.ready ? 'ready' : 'pending'}`} key={fw.name}>
+                  <div className="cc-name">{fw.name}</div>
+                  <div className="cc-stat">
+                    {fw.migratedFindings}/{fw.applicableFindings} migrated
+                  </div>
+                  <div className={`cc-badge ${fw.ready ? 'ok' : 'warn'}`}>
+                    {fw.ready ? 'Ready ✓' : 'In progress'}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={{ marginTop: 16 }}>
+              <a className="btn" href={`/api/scan/${scan.id}/compliance`}>Download compliance pack (JSON)</a>
+            </div>
+          </div>
+        );
+      })()}
 
       <div className="section">
         <h2>

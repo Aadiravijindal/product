@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start",
     "verify": "node scripts/verify.mjs",
+    "gate": "node scripts/ci-gate.mjs",
     "smoke": "node scripts/smoke.mjs",
     "typecheck": "tsc --noEmit",
     "test": "node scripts/verify.mjs"

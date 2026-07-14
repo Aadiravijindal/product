@@ -5,19 +5,24 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { RiskBadge, TopBar, getReviewer, usageLabel } from '@/components/ui';
 import { sideBySideDiff } from '@/lib/diff';
+import { buildPullRequest } from '@/lib/pr';
 import type { Finding } from '@/lib/types';
 
 const THRESHOLD = 85;
 
-function downloadPatch(finding: Finding, patchedCode: string) {
-  const base = finding.file.split('/').pop() || 'patched';
-  const blob = new Blob([patchedCode], { type: 'text/plain' });
+function downloadText(name: string, content: string) {
+  const blob = new Blob([content], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `${base}.quantum-safe`;
+  a.download = name;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+function downloadPatch(finding: Finding, patchedCode: string) {
+  const base = finding.file.split('/').pop() || 'patched';
+  downloadText(`${base}.quantum-safe`, patchedCode);
 }
 
 const AGENT_STEPS = [
@@ -81,6 +86,8 @@ export default function FindingDetail() {
   const [error, setError] = useState<string | null>(null);
   const [acting, setActing] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [showPR, setShowPR] = useState(false);
+  const [prCopied, setPrCopied] = useState(false);
   const [claudeLive, setClaudeLive] = useState(false);
   const [question, setQuestion] = useState('');
   const [qa, setQa] = useState<{ q: string; a: string }[]>([]);
@@ -252,6 +259,7 @@ export default function FindingDetail() {
         <h2>
           Proposed fix
           <span style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+            <button className="btn btn-sm btn-primary" onClick={() => setShowPR((v) => !v)}>{showPR ? 'Hide pull request' : 'Open pull request ↗'}</button>
             <button className="btn btn-sm" onClick={() => downloadPatch(finding, a.patchedCode)}>Download patched file</button>
             <button className="btn btn-sm" onClick={() => void copyPatch(a.patchedCode)}>{copied ? 'Copied ✓' : 'Copy patch'}</button>
           </span>
@@ -279,6 +287,34 @@ export default function FindingDetail() {
             <li key={i}>{c}</li>
           ))}
         </ul>
+
+        {showPR && (() => {
+          const pr = buildPullRequest(finding);
+          if (!pr) return null;
+          return (
+            <div className="pr-panel">
+              <div className="pr-head">
+                <span className="pr-branch">{pr.branch} → main</span>
+                <span style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+                  <button className="btn btn-sm" onClick={() => downloadText(`${pr.branch.split('/').pop()}.patch`, pr.patch)}>Download .patch</button>
+                  <button
+                    className="btn btn-sm"
+                    onClick={() => { void navigator.clipboard.writeText(pr.body); setPrCopied(true); setTimeout(() => setPrCopied(false), 1500); }}
+                  >
+                    {prCopied ? 'Copied ✓' : 'Copy PR description'}
+                  </button>
+                </span>
+              </div>
+              <div className="pr-title">{pr.title}</div>
+              <pre className="pr-body">{pr.body}</pre>
+              <div className="pr-note">
+                This is the exact pull request Recrypt opens — a git-applyable patch plus the proof (review, tests, digest)
+                attached. In production the GitHub connection opens it straight onto your repo; here you can download the
+                <code> .patch</code> and apply it with <code>git apply</code>.
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {a.review && (

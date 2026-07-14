@@ -1,0 +1,26 @@
+# Recrypt CI policy gate — fails a pull request that introduces new
+# quantum-vulnerable cryptography (RSA / ECC / RS256 / legacy TLS).
+# This is the "stop it coming back" control: once a codebase is migrated,
+# this keeps it migrated.
+name: Recrypt quantum-safe gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  crypto-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # needed to diff the PR against the base branch
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # Scan only what the pull request changed, and fail on high/critical.
+      - name: Recrypt crypto gate
+        run: node scripts/ci-gate.mjs --changed --fail-on high
+        env:
+          RECRYPT_BASE_REF: origin/${{ github.base_ref || 'main' }}
