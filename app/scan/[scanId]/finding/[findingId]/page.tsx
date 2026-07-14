@@ -98,11 +98,12 @@ export default function FindingDetail() {
   const analyze = useCallback(async () => {
     setPhase('analyzing');
     setError(null);
-    // Hard safety net: the full live pipeline (classify → generate → review →
-    // revise → prove) is bounded server-side, but never let the UI hang on a
-    // blank screen. If it exceeds 5 minutes, stop and offer Retry.
+    // Hard safety net: the full live pipeline (classify → generate → two
+    // red-team rounds with rewrites → prove) is bounded server-side, but never
+    // let the UI hang on a blank screen. Worst case is ~7 minutes of model
+    // calls; abort at 8 and offer Retry (which joins the in-flight run).
     const controller = new AbortController();
-    const hardCap = setTimeout(() => controller.abort(), 300_000);
+    const hardCap = setTimeout(() => controller.abort(), 480_000);
     try {
       const res = await fetch(`/api/scan/${scanId}/findings/${findingId}/analyze`, {
         method: 'POST',
