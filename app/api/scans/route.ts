@@ -3,7 +3,7 @@ import { allScans } from '@/lib/store';
 
 /** GET — scan history summaries for the home screen. */
 export async function GET() {
-  const scans = allScans().map((s) => {
+  const scans = (await allScans()).map((s) => {
     const migrated = s.findings.filter((f) => f.status === 'migrated').length;
     return {
       id: s.id,

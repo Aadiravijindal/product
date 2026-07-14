@@ -8,7 +8,7 @@ import { getScan } from '@/lib/store';
  */
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ scanId: string }> }) {
   const { scanId } = await ctx.params;
-  const scan = getScan(scanId);
+  const scan = await getScan(scanId);
   if (!scan) return NextResponse.json({ error: 'scan not found' }, { status: 404 });
 
   const doc = {

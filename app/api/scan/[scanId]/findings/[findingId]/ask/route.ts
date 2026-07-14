@@ -5,7 +5,7 @@ import { askAgent, claudeAvailable } from '@/lib/claude';
 /** POST { question } — live Q&A grounded in one finding. Requires the Claude API. */
 export async function POST(req: NextRequest, ctx: { params: Promise<{ scanId: string; findingId: string }> }) {
   const { scanId, findingId } = await ctx.params;
-  const finding = getFinding(scanId, findingId);
+  const finding = await getFinding(scanId, findingId);
   if (!finding) return NextResponse.json({ error: 'finding not found' }, { status: 404 });
 
   if (!claudeAvailable()) {

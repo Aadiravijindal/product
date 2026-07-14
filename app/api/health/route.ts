@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { claudeAvailable } from '@/lib/claude';
 import { PATTERN_COUNT } from '@/lib/scanner';
+import { storeBackend } from '@/lib/store';
 
 /**
  * GET /api/health — readiness probe for load balancers, uptime checks, and
@@ -13,6 +14,7 @@ export async function GET() {
     service: 'recrypt',
     detectionPatterns: PATTERN_COUNT,
     liveAnalysis: claudeAvailable(),
+    store: storeBackend(),
     time: new Date().toISOString(),
   });
 }

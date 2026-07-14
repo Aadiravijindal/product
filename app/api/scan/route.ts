@@ -17,13 +17,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'invalid JSON body' }, { status: 400 });
   }
 
-  const scanId = newScanId();
   const t0 = process.hrtime.bigint();
   let scan: Scan;
 
   if (body.repoId) {
     const repo = getSampleRepo(body.repoId);
     if (!repo) return NextResponse.json({ error: 'unknown repo' }, { status: 404 });
+    const scanId = newScanId(repo.id);
     const findings = scanFiles({ files: repo.files, scanId, repoId: repo.id });
     scan = {
       id: scanId,
@@ -36,6 +36,7 @@ export async function POST(req: NextRequest) {
     if (body.code.length > 200_000) {
       return NextResponse.json({ error: 'snippet too large (200 KB max for the demo)' }, { status: 413 });
     }
+    const scanId = newScanId();
     const findings = scanFiles({
       files: [{ path: 'pasted-snippet', content: body.code }],
       scanId,
@@ -51,6 +52,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'provide repoId or code' }, { status: 400 });
   }
 
-  saveScan(scan);
+  await saveScan(scan);
   return NextResponse.json({ scanId: scan.id, findingCount: scan.findings.length });
 }

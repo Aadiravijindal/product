@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getFinding, persist } from '@/lib/store';
+import { getScan, saveScan } from '@/lib/store';
 import { claudeAvailable, classifyFinding, generateRemediation, reviewPatch, revisePatch } from '@/lib/claude';
 import { builtinRemediation } from '@/lib/remediation';
 import { assessHndl, builtinReview, proofDigest } from '@/lib/assurance';
@@ -30,8 +30,9 @@ function friendlyApiError(err: unknown): string {
  */
 export async function POST(_req: NextRequest, ctx: { params: Promise<{ scanId: string; findingId: string }> }) {
   const { scanId, findingId } = await ctx.params;
-  const finding = getFinding(scanId, findingId);
-  if (!finding) return NextResponse.json({ error: 'finding not found' }, { status: 404 });
+  const scan = await getScan(scanId);
+  const finding = scan?.findings.find((f) => f.id === findingId);
+  if (!scan || !finding) return NextResponse.json({ error: 'finding not found' }, { status: 404 });
 
   if (finding.analysis) return NextResponse.json({ finding });
 
@@ -112,6 +113,6 @@ export async function POST(_req: NextRequest, ctx: { params: Promise<{ scanId: s
   analysis.hndl = assessHndl(finding);
 
   finding.analysis = analysis;
-  persist();
+  await saveScan(scan);
   return NextResponse.json({ finding });
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getFinding, persist } from '@/lib/store';
+import { getScan, saveScan } from '@/lib/store';
 import type { FindingStatus } from '@/lib/types';
 
 const ACTIONS: Record<string, FindingStatus> = {
@@ -10,8 +10,9 @@ const ACTIONS: Record<string, FindingStatus> = {
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ scanId: string; findingId: string }> }) {
   const { scanId, findingId } = await ctx.params;
-  const finding = getFinding(scanId, findingId);
-  if (!finding) return NextResponse.json({ error: 'finding not found' }, { status: 404 });
+  const scan = await getScan(scanId);
+  const finding = scan?.findings.find((f) => f.id === findingId);
+  if (!scan || !finding) return NextResponse.json({ error: 'finding not found' }, { status: 404 });
 
   let body: { action?: string; reviewer?: string };
   try {
@@ -26,6 +27,6 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ scanId: st
   finding.status = status;
   finding.reviewer = (body.reviewer || 'Demo User').slice(0, 80);
   finding.reviewedAt = new Date().toISOString();
-  persist();
+  await saveScan(scan);
   return NextResponse.json({ finding });
 }
