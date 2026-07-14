@@ -238,3 +238,82 @@ export async function listFixRuns(): Promise<FixRunRecord[]> {
   }
   return aux().fixRuns;
 }
+
+// ---------------------------------------------------------------------------
+// Watchlist (continuous monitoring) + policy configuration — key/value blobs.
+// ---------------------------------------------------------------------------
+
+export interface WatchEntry {
+  /** sample repo id or "gh:owner/repo" */
+  key: string;
+  label: string;
+  kind: 'sample' | 'github';
+  githubUrl?: string;
+  addedAt: string;
+  lastScanAt: string;
+  lastScanId: string;
+  /** findingKey:file signatures from the last scan, for drift detection */
+  signatures: string[];
+  lastFindingCount: number;
+  /** signatures that appeared since the previous scan */
+  newSinceLast: string[];
+}
+
+const gw = globalThis as unknown as { __recryptKvBlobs?: Map<string, unknown> };
+function blobs(): Map<string, unknown> {
+  if (!gw.__recryptKvBlobs) gw.__recryptKvBlobs = new Map();
+  return gw.__recryptKvBlobs;
+}
+const BLOB_FILE = path.join(process.cwd(), '.recrypt-blobs.json');
+let blobsLoaded = false;
+function loadBlobs(): void {
+  if (blobsLoaded) return;
+  blobsLoaded = true;
+  try {
+    if (fs.existsSync(BLOB_FILE)) {
+      const raw = JSON.parse(fs.readFileSync(BLOB_FILE, 'utf8')) as Record<string, unknown>;
+      for (const [k, v] of Object.entries(raw)) blobs().set(k, v);
+    }
+  } catch { /* fresh */ }
+}
+function persistBlobs(): void {
+  try {
+    fs.writeFileSync(BLOB_FILE, JSON.stringify(Object.fromEntries(blobs())));
+  } catch { /* read-only fs */ }
+}
+
+async function getBlob<T>(key: string, fallback: T): Promise<T> {
+  if (KV_ENABLED) {
+    const raw = await kv<string | null>(['GET', `blob:${key}`]).catch(() => null);
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  }
+  loadBlobs();
+  return (blobs().get(key) as T) ?? fallback;
+}
+
+async function setBlob<T>(key: string, value: T): Promise<void> {
+  if (KV_ENABLED) {
+    await kv(['SET', `blob:${key}`, JSON.stringify(value)]).catch(() => {});
+    return;
+  }
+  loadBlobs();
+  blobs().set(key, value);
+  persistBlobs();
+}
+
+export async function getWatchlist(): Promise<WatchEntry[]> {
+  return getBlob<WatchEntry[]>('watchlist', []);
+}
+
+export async function saveWatchlist(list: WatchEntry[]): Promise<void> {
+  await setBlob('watchlist', list.slice(0, 20));
+}
+
+/** Per-policy enabled/disabled overrides (policy id -> enabled). */
+export async function getPolicyState(): Promise<Record<string, boolean>> {
+  return getBlob<Record<string, boolean>>('policy-state', {});
+}
+
+export async function savePolicyState(state: Record<string, boolean>): Promise<void> {
+  await setBlob('policy-state', state);
+}

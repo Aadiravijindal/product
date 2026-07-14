@@ -33,6 +33,14 @@ Product features beyond the core loop:
   Kubernetes TLS secrets, PEM/SSH key material (the `infra-configs` sample repo demos it).
 - **CBOM import** — paste a CycloneDX CBOM from IBM Quantum Safe / SandboxAQ / cbomkit and the
   inventory becomes findings ready for remediation ("they find it, we fix it").
+- **Continuous watch** — add repos (sample or public GitHub) to a watchlist; a daily Vercel cron
+  (and a console button) re-scans them and flags **drift**: new quantum-vulnerable usages since the
+  last pass, logged to the audit trail.
+- **Live policy engine** — enforcing/monitor toggles persist server-side and are audited; the
+  console's gate tester runs any snippet through the real detection engine and returns the exact
+  merge verdict CI would give.
+- **Crypto-agility drill** — one click re-executes the real ML-DSA/ML-KEM proofs on every stored
+  patch across every scan and reports regressions (the "new FIPS lands, re-verify the fleet" muscle).
 - **Fix runs** — batch-run the full pipeline (generate → red-team rounds → real proofs) across a
   whole scan with bounded parallelism; honest stats recorded and listed in the Enterprise Console.
 - **Audit trail** — real events (sign-ins, scans, patches, decisions, fix runs) logged and shown in
@@ -75,13 +83,13 @@ Product features beyond the core loop:
 ## Verify it works (one command)
 
 After `npm run build`, run the built-in verification harness. It boots a
-server, runs 149 automated checks across the whole product (scanning,
+server, runs 164 automated checks across the whole product (scanning,
 the assurance pipeline, real crypto proofs, migration plan, CBOM export,
 error handling), prints a pass/fail summary, and shuts the server down.
 
 ```bash
 npm run build     # once
-npm run verify    # → "149 passed, 0 failed"
+npm run verify    # → "164 passed, 0 failed"
 ```
 
 Other checks:

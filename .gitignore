@@ -8,3 +8,4 @@ next-env.d.ts
 .DS_Store
 .recrypt-data.json
 .recrypt-aux.json
+.recrypt-blobs.json

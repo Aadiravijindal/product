@@ -19,6 +19,20 @@ interface SimRun {
   merged: number; roundsHistogram: { one: number; two: number }; flawsCaught: number; note: string;
 }
 interface AuditRow { at: string; actor: string; action: string; target: string }
+interface WatchRow {
+  key: string; label: string; kind: string; addedAt: string; lastScanAt: string;
+  lastScanId: string; lastFindingCount: number; newSinceLast: string[];
+}
+interface PolicyRow { id: string; rule: string; scope: string; status: string; blockedThisMonth: number }
+interface GateResult {
+  verdict: string; wouldMerge: boolean;
+  violations: { line: number; algorithm: string; usageType: string; ruleId: string; rule: string; action: string }[];
+}
+const UNPATCHABLE = [
+  { asset: 'HSM cluster (payments signing)', why: 'Firmware caps at RSA/ECDSA — no ML-DSA support', plan: 'Vendor PQC firmware GA Q2 2027 → rotate', due: '2027-06-30' },
+  { asset: '40× branch VPN appliances', why: 'TLS stack fixed in hardware', plan: 'Staged replacement, 10/quarter', due: '2027-12-31' },
+  { asset: 'Legacy mainframe channel (ISO 8583)', why: 'Cannot rebuild; crypto in vendor module', plan: 'Wrap in PQC tunnel at the gateway', due: '2026-12-15' },
+];
 interface Payload {
   owner: string;
   summary: {
@@ -58,6 +72,57 @@ export default function PlatformConsole() {
   const [scanning, setScanning] = useState<string | null>(null);
   const [fixRunning, setFixRunning] = useState(false);
   const [fixRunMsg, setFixRunMsg] = useState<string | null>(null);
+  const [watchlist, setWatchlist] = useState<WatchRow[]>([]);
+  const [watchBusy, setWatchBusy] = useState(false);
+  const [policyRules, setPolicyRules] = useState<PolicyRow[]>([]);
+  const [gateCode, setGateCode] = useState('');
+  const [gateResult, setGateResult] = useState<GateResult | null>(null);
+  const [gateBusy, setGateBusy] = useState(false);
+  const [drill, setDrill] = useState<{ analyses: number; testsRun: number; testsPassed: number; regressions: number } | null>(null);
+  const [drillBusy, setDrillBusy] = useState(false);
+
+  const refreshWatch = () => fetch('/api/watch').then((r) => r.json()).then((d) => setWatchlist(d.watchlist ?? [])).catch(() => {});
+  const refreshPolicy = () => fetch('/api/policy').then((r) => r.json()).then((d) => setPolicyRules(d.rules ?? [])).catch(() => {});
+
+  useEffect(() => { refreshWatch(); refreshPolicy(); }, []);
+
+  const watchRepo = async (repoId: string) => {
+    setWatchBusy(true);
+    await fetch('/api/watch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ repoId }) }).catch(() => {});
+    await refreshWatch();
+    setWatchBusy(false);
+  };
+  const unwatch = async (key: string) => {
+    await fetch(`/api/watch?key=${encodeURIComponent(key)}`, { method: 'DELETE' }).catch(() => {});
+    refreshWatch();
+  };
+  const rescanAll = async () => {
+    setWatchBusy(true);
+    await fetch('/api/watch/tick').catch(() => {});
+    await refreshWatch();
+    setWatchBusy(false);
+  };
+  const togglePolicy = async (id: string, enforcing: boolean) => {
+    await fetch('/api/policy', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, enforcing }) }).catch(() => {});
+    refreshPolicy();
+  };
+  const checkGate = async () => {
+    setGateBusy(true);
+    setGateResult(null);
+    try {
+      const r = await fetch('/api/policy/check', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: gateCode }) });
+      setGateResult(await r.json());
+    } catch { /* noop */ }
+    setGateBusy(false);
+  };
+  const runDrill = async () => {
+    setDrillBusy(true);
+    try {
+      const r = await fetch('/api/reverify', { method: 'POST' });
+      if (r.ok) setDrill(await r.json());
+    } catch { /* noop */ }
+    setDrillBusy(false);
+  };
 
   useEffect(() => {
     fetch('/api/platform/fleet')
@@ -206,6 +271,27 @@ export default function PlatformConsole() {
           </div>
 
           <div className="section">
+            <h2>Crypto-agility drill — re-prove the fleet, live</h2>
+            <p className="explain" style={{ fontSize: 13.5 }}>
+              When NIST revises a parameter set or a new FIPS lands, this is the muscle you exercise:
+              re-execute the real ML-DSA / ML-KEM equivalence proofs on <b>every stored patch</b>
+              across every scan, right now, and surface any regression. PQC is not the last
+              migration — this button is why Recrypt outlives 2030.
+            </p>
+            <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+              <button className="btn btn-primary" disabled={drillBusy} onClick={runDrill}>
+                {drillBusy ? 'Re-proving the fleet…' : 'Run agility drill →'}
+              </button>
+              {drill && (
+                <span className="explain" style={{ fontSize: 13.5 }}>
+                  {drill.analyses} stored patches re-proven · {drill.testsPassed}/{drill.testsRun} proofs passed ·{' '}
+                  {drill.regressions === 0 ? <b style={{ color: 'var(--accent)' }}>0 regressions</b> : <b className="sev-crit">{drill.regressions} regressions</b>}
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="section">
             <h2>Risk by team</h2>
             <table className="findings">
               <thead><tr><th>Team</th><th>Open findings</th><th>Migrated</th><th>Progress</th></tr></thead>
@@ -231,6 +317,43 @@ export default function PlatformConsole() {
       )}
 
       {tab === 'repos' && (
+        <>
+        <div className="section">
+          <h2>Continuous watch — real monitoring
+            <button className="btn btn-small" style={{ marginLeft: 12 }} disabled={watchBusy} onClick={rescanAll}>
+              {watchBusy ? 'Re-scanning…' : 'Re-scan all now'}
+            </button>
+          </h2>
+          <p className="explain" style={{ fontSize: 13.5 }}>
+            Watched repos are re-scanned on a daily schedule (Vercel cron) and on demand. New
+            quantum-vulnerable usages since the previous pass are flagged as <b>drift</b> and logged
+            to the audit trail — the &ldquo;new commit with RSA in it? caught the same day&rdquo; loop, live.
+          </p>
+          {watchlist.length === 0 ? (
+            <p className="explain" style={{ fontSize: 13.5 }}>
+              Nothing watched yet — use the <b>Watch</b> button on a live repo below.
+            </p>
+          ) : (
+            <table className="findings">
+              <thead><tr><th>Repo</th><th>Kind</th><th>Last scan</th><th>Findings</th><th>Drift since last pass</th><th></th></tr></thead>
+              <tbody>
+                {watchlist.map((w) => (
+                  <tr key={w.key}>
+                    <td className="mono"><span className="live-dot" />{w.label}</td>
+                    <td>{w.kind}</td>
+                    <td>{w.lastScanAt ? new Date(w.lastScanAt).toLocaleString() : '—'}</td>
+                    <td>{w.lastFindingCount}</td>
+                    <td>{w.newSinceLast.length > 0 ? <span className="sev-crit">▲ {w.newSinceLast.length} new: {w.newSinceLast.slice(0, 2).join(', ')}</span> : <span style={{ color: 'var(--accent)' }}>no new vulnerable crypto</span>}</td>
+                    <td style={{ display: 'flex', gap: 6 }}>
+                      {w.lastScanId && <button className="btn btn-small" onClick={() => router.push(`/scan/${w.lastScanId}`)}>Open</button>}
+                      <button className="btn btn-small" onClick={() => unwatch(w.key)}>Unwatch</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
         <div className="section">
           <h2>Repositories under continuous scan</h2>
           <p className="explain" style={{ fontSize: 13.5 }}>
@@ -256,9 +379,16 @@ export default function PlatformConsole() {
                         {r.scanId && (
                           <button className="btn btn-small" onClick={() => router.push(`/scan/${r.scanId}`)}>Open</button>
                         )}
-                        <button className="btn btn-small btn-primary" disabled={scanning !== null || r.id.startsWith('real-')} onClick={() => scanLive(r.id)}>
-                          {scanning === r.id ? 'Scanning…' : 'Scan now →'}
-                        </button>
+                        {!r.id.startsWith('real-') && (
+                          <>
+                            <button className="btn btn-small btn-primary" disabled={scanning !== null} onClick={() => scanLive(r.id)}>
+                              {scanning === r.id ? 'Scanning…' : 'Scan now →'}
+                            </button>
+                            {!watchlist.some((w) => w.key === r.id) && (
+                              <button className="btn btn-small" disabled={watchBusy} onClick={() => watchRepo(r.id)}>Watch</button>
+                            )}
+                          </>
+                        )}
                       </span>
                     ) : (
                       <span className="sim-tag">simulated</span>
@@ -269,6 +399,7 @@ export default function PlatformConsole() {
             </tbody>
           </table>
         </div>
+        </>
       )}
 
       {tab === 'runs' && (
@@ -355,6 +486,25 @@ export default function PlatformConsole() {
             enforce, key exchange migrates before deadlines, and no policy flips to
             &ldquo;enforcing&rdquo; while a counterparty above is still in &ldquo;waiting.&rdquo;
           </p>
+
+          <h2 style={{ marginTop: 26 }}>Unpatchable assets — track &amp; plan <span className="sim-tag">representative</span></h2>
+          <p className="explain" style={{ fontSize: 13.5 }}>
+            What software can&rsquo;t fix, the platform still owns: hardware and appliances that can&rsquo;t
+            take a PQC patch get a replacement schedule your auditor can read.
+          </p>
+          <table className="findings">
+            <thead><tr><th>Asset</th><th>Why it can&rsquo;t be patched</th><th>Plan</th><th>Due</th></tr></thead>
+            <tbody>
+              {UNPATCHABLE.map((u) => (
+                <tr key={u.asset}>
+                  <td>{u.asset}</td>
+                  <td>{u.why}</td>
+                  <td>{u.plan}</td>
+                  <td className="mono">{u.due}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 
@@ -367,18 +517,65 @@ export default function PlatformConsole() {
               exceptions require CISO sign-off and expire automatically.
             </p>
             <table className="findings">
-              <thead><tr><th>Rule</th><th>Scope</th><th>Status</th><th>Blocked this month</th></tr></thead>
+              <thead><tr><th>Rule</th><th>Scope</th><th>Status (click to flip)</th><th>Blocked this month</th></tr></thead>
               <tbody>
-                {data.policies.map((p) => (
+                {(policyRules.length > 0 ? policyRules : data.policies).map((p) => (
                   <tr key={p.id}>
                     <td>{p.rule}</td>
                     <td>{p.scope}</td>
-                    <td><span className={`badge ${p.status === 'enforcing' ? 'verdict-approved' : 'verdict-approved_with_notes'}`}>{p.status}</span></td>
+                    <td>
+                      <button
+                        className={`badge ${p.status === 'enforcing' ? 'verdict-approved' : 'verdict-approved_with_notes'}`}
+                        style={{ cursor: 'pointer', border: 'none' }}
+                        onClick={() => togglePolicy(p.id, p.status !== 'enforcing')}
+                        title="Toggle enforcing / monitor-only (persisted, audited)"
+                      >
+                        {p.status}
+                      </button>
+                    </td>
                     <td>{p.blockedThisMonth}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            <p className="explain" style={{ fontSize: 13.5 }}>
+              Toggles are live: state persists server-side and every flip lands in the audit trail.
+            </p>
+          </div>
+
+          <div className="section">
+            <h2>Test code against the gate — live</h2>
+            <p className="explain" style={{ fontSize: 13.5 }}>
+              Paste a diff or snippet: the real detection engine evaluates it against the enabled
+              policies and returns the exact merge verdict the CI gate would give.
+            </p>
+            <textarea
+              className="code-input"
+              style={{ minHeight: 90 }}
+              placeholder={'const token = jwt.sign(payload, key, { algorithm: "RS256" });'}
+              value={gateCode}
+              onChange={(e) => setGateCode(e.target.value)}
+            />
+            <div style={{ marginTop: 10, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+              <button className="btn btn-primary" disabled={gateBusy || gateCode.trim().length === 0} onClick={checkGate}>
+                {gateBusy ? 'Checking…' : 'Run gate check'}
+              </button>
+              {gateResult && (
+                <span className={`badge ${gateResult.verdict === 'pass' ? 'verdict-approved' : gateResult.verdict === 'warn' ? 'verdict-approved_with_notes' : 'verdict-revised'}`}>
+                  {gateResult.verdict === 'pass' ? 'PASS — would merge' : gateResult.verdict === 'warn' ? 'WARN — merges with warnings' : 'BLOCKED — merge denied'}
+                </span>
+              )}
+            </div>
+            {gateResult && gateResult.violations.length > 0 && (
+              <div style={{ marginTop: 10 }}>
+                {gateResult.violations.map((v, i) => (
+                  <div className="review-issue" key={i}>
+                    <span className={`badge ${v.action === 'BLOCK' ? 'sev-high' : 'sev-medium'}`}>{v.action}</span>
+                    <span>line {v.line}: <b>{v.algorithm}</b> ({v.usageType}) — violates {v.ruleId}: {v.rule}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <div className="section">
             <h2>Active exceptions</h2>

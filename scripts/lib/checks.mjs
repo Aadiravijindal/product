@@ -243,6 +243,56 @@ export async function runChecks(base, { section = () => {} } = {}) {
     t.ok((await get(base, '/api/platform/fleet')).status === 401, 'fleet API without session → 401');
     const bad = await post(base, '/api/platform/login', { email: 'x@y.com', passcode: 'wrong' });
     t.ok(bad.status === 401, 'wrong console credentials → 401');
+    t.ok((await post(base, '/api/watch', { repoId: 'api-gateway' })).status === 401, 'watch add without session → 401');
+    t.ok((await fetch(base + '/api/policy', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'pol-1', enforcing: false }) })).status === 401, 'policy toggle without session → 401');
+    t.ok((await fetch(base + '/api/reverify', { method: 'POST' })).status === 401, 'agility drill without session → 401');
+  }
+
+  section('policy engine — live rules & gate verdicts');
+  {
+    const rules = await get(base, '/api/policy');
+    t.ok(rules.status === 200 && rules.data.rules.length >= 5, 'policy rules listed with state');
+    const rs256 = await post(base, '/api/policy/check', { code: 'const t = jwt.sign(payload, key, { algorithm: "RS256" });' });
+    t.ok(rs256.status === 200 && rs256.data.verdict !== 'pass' && rs256.data.violations.length >= 1, 'RS256 snippet violates the gate', JSON.stringify(rs256.data));
+    const clean = await post(base, '/api/policy/check', { code: 'const x = "hello, no crypto here";' });
+    t.ok(clean.status === 200 && clean.data.verdict === 'pass' && clean.data.wouldMerge === true, 'clean snippet passes the gate');
+    t.ok((await post(base, '/api/policy/check', {})).status === 400, 'gate check without code → 400');
+  }
+
+  section('continuous watch + agility drill (console session; skipped if custom passcode)');
+  {
+    // Default owner credentials apply when PLATFORM_PASSCODE is unset (the harness case).
+    const login = await fetch(base + '/api/platform/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'aadijindal258@gmail.com', passcode: 'recrypt-preview' }),
+    });
+    if (login.status !== 200) {
+      t.ok(true, 'console session checks skipped (custom PLATFORM_PASSCODE set)');
+    } else {
+      const cookie = (login.headers.get('set-cookie') || '').split(';')[0];
+      const auth = { 'content-type': 'application/json', cookie };
+      const add = await fetch(base + '/api/watch', { method: 'POST', headers: auth, body: JSON.stringify({ repoId: 'api-gateway' }) });
+      const addData = await add.json();
+      t.ok(add.status === 200 && addData.entry.lastFindingCount >= 1, 'watch: sample repo added with baseline scan', JSON.stringify(addData));
+      const dup = await fetch(base + '/api/watch', { method: 'POST', headers: auth, body: JSON.stringify({ repoId: 'api-gateway' }) });
+      t.ok(dup.status === 409, 'watch: duplicate add → 409');
+      const tick = await get(base, '/api/watch/tick');
+      t.ok(tick.status === 200 && tick.data.rescanned >= 1, 'watch tick: re-scans watched repos');
+      const list = await get(base, '/api/watch');
+      const entry = list.data.watchlist.find((w) => w.key === 'api-gateway');
+      t.ok(!!entry && entry.newSinceLast.length === 0, 'watch: no false drift on unchanged repo');
+      const toggle = await fetch(base + '/api/policy', { method: 'PATCH', headers: auth, body: JSON.stringify({ id: 'pol-1', enforcing: false }) });
+      t.ok(toggle.status === 200, 'policy toggle with session works');
+      const flipped = await get(base, '/api/policy');
+      t.ok(flipped.data.rules.find((r) => r.id === 'pol-1')?.status === 'monitor', 'policy state persisted');
+      await fetch(base + '/api/policy', { method: 'PATCH', headers: auth, body: JSON.stringify({ id: 'pol-1', enforcing: true }) });
+      const drill = await fetch(base + '/api/reverify', { method: 'POST', headers: auth });
+      const drillData = await drill.json();
+      t.ok(drill.status === 200 && drillData.testsPassed === drillData.testsRun, 'agility drill: fleet re-proven, no regressions', JSON.stringify(drillData));
+      const del = await fetch(base + '/api/watch?key=api-gateway', { method: 'DELETE', headers: auth });
+      t.ok(del.status === 200, 'watch: unwatch works');
+    }
   }
 
   return t;
