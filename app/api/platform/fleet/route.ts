@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { AUDIT_SEED, EXCEPTIONS, FIX_RUNS, FLEET, POLICIES, checkToken, fleetSummary, ownerEmail } from '@/lib/platform';
+import { AUDIT_SEED, EXCEPTIONS, FIX_RUNS, FLEET, POLICIES, fleetSummary, ownerEmail, teamRoster, verifyToken } from '@/lib/platform';
+import { githubToken } from '@/lib/github';
 import { allScans, listAudit, listFixRuns } from '@/lib/store';
 
 /**
@@ -8,7 +9,8 @@ import { allScans, listAudit, listFixRuns } from '@/lib/store';
  * merged in front of the labeled representative simulation.
  */
 export async function GET(req: NextRequest) {
-  if (!checkToken(req.cookies.get('recrypt_platform')?.value)) {
+  const session = verifyToken(req.cookies.get('recrypt_platform')?.value);
+  if (!session) {
     return NextResponse.json({ error: 'not signed in' }, { status: 401 });
   }
 
@@ -66,6 +68,14 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     owner: ownerEmail(),
+    session,
+    team: teamRoster(),
+    integrations: {
+      github: Boolean(githubToken()),
+      slack: Boolean(process.env.SLACK_WEBHOOK_URL),
+      liveAI: Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN),
+      redis: Boolean(process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL),
+    },
     summary: fleetSummary(),
     repos: [...extraRows, ...repos],
     fixRuns: { real: realRuns, simulated: FIX_RUNS },

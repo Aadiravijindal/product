@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { appendAudit, getWatchlist, saveWatchlist } from '@/lib/store';
 import { rescanEntry } from '@/lib/watch';
+import { notify } from '@/lib/notify';
 
 /**
  * GET — re-scan every watched repo and record drift. Invoked by the Vercel
@@ -27,6 +28,7 @@ export async function GET() {
           `DRIFT: ${next.newSinceLast.length} new quantum-vulnerable usage${next.newSinceLast.length === 1 ? '' : 's'} since last scan`,
           next.label
         );
+        await notify(`:rotating_light: Recrypt drift on *${next.label}*: ${next.newSinceLast.length} new quantum-vulnerable usage(s) — ${next.newSinceLast.slice(0, 3).join(', ')}`);
       }
     } catch {
       updated.push(entry); // keep the old state; try again next tick

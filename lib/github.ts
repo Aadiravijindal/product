@@ -30,10 +30,26 @@ export function parseGithubUrl(input: string): GithubRepoRef | null {
   return { owner: m[1], repo: m[2], url: `https://github.com/${m[1]}/${m[2]}` };
 }
 
+/**
+ * Optional GitHub token (classic PAT or fine-grained) from the environment.
+ * With it set, PRIVATE repositories can be scanned and pull requests can be
+ * opened for real. Without it, public repos still work unauthenticated.
+ */
+export function githubToken(): string {
+  return process.env.GITHUB_TOKEN || process.env.GH_TOKEN || '';
+}
+
+export function ghHeaders(): Record<string, string> {
+  const h: Record<string, string> = { accept: 'application/vnd.github+json', 'user-agent': 'recrypt-scanner' };
+  const tok = githubToken();
+  if (tok) h.authorization = `Bearer ${tok}`;
+  return h;
+}
+
 async function defaultBranch(ref: GithubRepoRef): Promise<string> {
   try {
     const res = await fetch(`https://api.github.com/repos/${ref.owner}/${ref.repo}`, {
-      headers: { accept: 'application/vnd.github+json', 'user-agent': 'recrypt-scanner' },
+      headers: ghHeaders(),
       cache: 'no-store',
     });
     if (res.ok) {
@@ -79,9 +95,14 @@ export async function fetchPublicRepo(ref: GithubRepoRef): Promise<FetchedRepo> 
   let tarball: Buffer | null = null;
   let used = branch;
   for (const b of candidates) {
-    const res = await fetch(`https://codeload.github.com/${ref.owner}/${ref.repo}/tar.gz/refs/heads/${b}`, {
-      headers: { 'user-agent': 'recrypt-scanner' },
+    // api.github.com/tarball honors the auth token, so private repos work too.
+    const url = githubToken()
+      ? `https://api.github.com/repos/${ref.owner}/${ref.repo}/tarball/${b}`
+      : `https://codeload.github.com/${ref.owner}/${ref.repo}/tar.gz/refs/heads/${b}`;
+    const res = await fetch(url, {
+      headers: ghHeaders(),
       cache: 'no-store',
+      redirect: 'follow',
     });
     if (!res.ok) continue;
     const raw = Buffer.from(await res.arrayBuffer());

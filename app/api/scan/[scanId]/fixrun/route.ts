@@ -4,6 +4,7 @@ import { claudeAvailable, classifyFinding, generateRemediation, hardenPatchLive 
 import { builtinRemediation } from '@/lib/remediation';
 import { assessHndl, builtinReview, proofDigest } from '@/lib/assurance';
 import { runEquivalenceTests } from '@/lib/verify';
+import { notify } from '@/lib/notify';
 import type { Analysis, Finding, FixRunRecord } from '@/lib/types';
 
 /** A live batch across many findings needs the long window. */
@@ -125,6 +126,7 @@ export async function POST(_req: NextRequest, ctx: { params: Promise<{ scanId: s
     run.source
   );
 
+  await notify(`:white_check_mark: Recrypt fix run on *${run.source}*: ${run.completed}/${run.requested} findings remediated, ${flawsCaught} flaws caught by the red team, ${testsPassed}/${testsRun} proofs passed`);
   return NextResponse.json({ run, remaining: pending.length - batch.length });
 }
 

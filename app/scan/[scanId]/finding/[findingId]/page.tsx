@@ -90,6 +90,8 @@ export default function FindingDetail() {
   const [copied, setCopied] = useState(false);
   const [showPR, setShowPR] = useState(false);
   const [prCopied, setPrCopied] = useState(false);
+  const [prPushing, setPrPushing] = useState(false);
+  const [prPushMsg, setPrPushMsg] = useState<string | null>(null);
   const [claudeLive, setClaudeLive] = useState(false);
   const [question, setQuestion] = useState('');
   const [qa, setQa] = useState<{ q: string; a: string }[]>([]);
@@ -176,6 +178,32 @@ export default function FindingDetail() {
       setQa((prev) => [...prev, { q, a: 'The agent could not answer — retry.' }]);
     }
     setAsking(false);
+  };
+
+  const openRealPr = async (repoUrl?: string) => {
+    setPrPushing(true);
+    setPrPushMsg(null);
+    try {
+      const res = await fetch(`/api/scan/${scanId}/findings/${findingId}/openpr`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(repoUrl ? { repoUrl } : {}),
+      });
+      const d = await res.json();
+      if (res.status === 400 && !repoUrl && /provide repoUrl/.test(d.error || '')) {
+        // Non-GitHub scan (sample/snippet/CBOM): ask which repo to target.
+        const url = window.prompt('GitHub repo to open the PR on (https://github.com/owner/repo):') || '';
+        setPrPushing(false);
+        if (url) void openRealPr(url);
+        return;
+      }
+      if (!res.ok) throw new Error(d.error || 'PR creation failed');
+      setPrPushMsg(`✅ Opened <a href="${d.pr.url}" target="_blank" rel="noreferrer" style="color:var(--blue)">PR #${d.pr.number}</a> on GitHub.`);
+    } catch (e) {
+      setPrPushMsg(`⚠️ ${e instanceof Error ? e.message : 'PR creation failed'}`);
+    } finally {
+      setPrPushing(false);
+    }
   };
 
   const act = async (action: 'approve' | 'reject' | 'escalate') => {
@@ -310,10 +338,16 @@ export default function FindingDetail() {
               </div>
               <div className="pr-title">{pr.title}</div>
               <pre className="pr-body">{pr.body}</pre>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginTop: 12 }}>
+                <button className="btn btn-sm btn-primary" disabled={prPushing} onClick={() => openRealPr()}>
+                  {prPushing ? 'Opening on GitHub…' : 'Open this PR on GitHub for real ↗'}
+                </button>
+                {prPushMsg && <span className="explain" style={{ fontSize: 13 }} dangerouslySetInnerHTML={{ __html: prPushMsg }} />}
+              </div>
               <div className="pr-note">
-                This is the exact pull request Recrypt opens — a git-applyable patch plus the proof (review, tests, digest)
-                attached. In production the GitHub connection opens it straight onto your repo; here you can download the
-                <code> .patch</code> and apply it with <code>git apply</code>.
+                The green button opens this pull request <b>on the real GitHub repo</b> when a
+                <code> GITHUB_TOKEN</code> is configured (repo write). Otherwise, download the
+                <code> .patch</code> and apply it with <code>git apply</code> — same result.
               </div>
             </div>
           );

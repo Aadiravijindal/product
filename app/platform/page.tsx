@@ -35,6 +35,9 @@ const UNPATCHABLE = [
 ];
 interface Payload {
   owner: string;
+  session: { email: string; role: string };
+  team: { email: string; role: string }[];
+  integrations: { github: boolean; slack: boolean; liveAI: boolean; redis: boolean };
   summary: {
     repos: number; open: number; migrated: number; critical: number;
     totalUsages: number; migratedPct: number; exposureScore: number;
@@ -47,7 +50,7 @@ interface Payload {
   audit: { real: AuditRow[]; seed: AuditRow[] };
 }
 
-type Tab = 'overview' | 'repos' | 'runs' | 'policy' | 'counterparties' | 'audit';
+type Tab = 'overview' | 'repos' | 'runs' | 'policy' | 'counterparties' | 'audit' | 'settings';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'overview', label: 'Overview' },
@@ -56,6 +59,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'policy', label: 'Policy gate' },
   { id: 'counterparties', label: 'Counterparties' },
   { id: 'audit', label: 'Audit trail' },
+  { id: 'settings', label: 'Settings' },
 ];
 
 const COUNTERPARTIES = [
@@ -210,6 +214,7 @@ export default function PlatformConsole() {
         </div>
         <nav>
           <Link href="/">Scanner</Link>
+          <span className="role-chip">{data.session.role}</span>
           <a onClick={logout} style={{ cursor: 'pointer' }}>Sign out</a>
         </nav>
       </div>
@@ -597,6 +602,48 @@ export default function PlatformConsole() {
               The same gate ships today as a CI script — <code>npm run gate</code> — and a GitHub
               Actions workflow in this repo.
             </p>
+          </div>
+        </>
+      )}
+
+      {tab === 'settings' && (
+        <>
+          <div className="section">
+            <h2>Integrations</h2>
+            <p className="explain" style={{ fontSize: 13.5 }}>
+              Live status of the connectors that power the real workflows. Each is enabled by setting
+              one environment variable — no code changes.
+            </p>
+            <table className="findings">
+              <thead><tr><th>Integration</th><th>Status</th><th>Enables</th><th>Env var</th></tr></thead>
+              <tbody>
+                <tr><td>GitHub (private repos + real PRs)</td><td>{data.integrations.github ? <span className="badge verdict-approved">connected</span> : <span className="badge verdict-revised">not set</span>}</td><td>Scan private repos, open real pull requests</td><td className="mono">GITHUB_TOKEN</td></tr>
+                <tr><td>Slack / webhook alerts</td><td>{data.integrations.slack ? <span className="badge verdict-approved">connected</span> : <span className="badge verdict-revised">not set</span>}</td><td>Drift, fix-run, and PR notifications</td><td className="mono">SLACK_WEBHOOK_URL</td></tr>
+                <tr><td>Live AI pipeline</td><td>{data.integrations.liveAI ? <span className="badge verdict-approved">connected</span> : <span className="badge verdict-revised">not set</span>}</td><td>Live classification + red-team loop</td><td className="mono">ANTHROPIC_API_KEY</td></tr>
+                <tr><td>Shared store (Redis)</td><td>{data.integrations.redis ? <span className="badge verdict-approved">connected</span> : <span className="badge verdict-approved_with_notes">in-memory</span>}</td><td>Cross-instance persistence on serverless</td><td className="mono">KV_REST_API_URL</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div className="section">
+            <h2>Team &amp; roles</h2>
+            <p className="explain" style={{ fontSize: 13.5 }}>
+              Roles gate who can approve merges. Owners and approvers can approve; viewers are
+              read-only. Add members with the <code>PLATFORM_TEAM</code> env var
+              (<span className="mono">email:approver,email:viewer</span>). Full SSO (Okta/SAML) is the
+              funded roadmap; the role model that drives the audit trail is live now.
+            </p>
+            <table className="findings">
+              <thead><tr><th>Member</th><th>Role</th><th>Can approve merges?</th></tr></thead>
+              <tbody>
+                {data.team.map((m) => (
+                  <tr key={m.email}>
+                    <td className="mono">{m.email}{m.email === data.session.email ? ' (you)' : ''}</td>
+                    <td><span className={`badge ${m.role === 'owner' ? 'verdict-approved' : m.role === 'approver' ? 'verdict-approved_with_notes' : 'verdict-revised'}`}>{m.role}</span></td>
+                    <td>{m.role === 'viewer' ? 'no' : 'yes'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </>
       )}

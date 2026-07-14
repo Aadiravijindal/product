@@ -372,3 +372,4 @@ ul.changes li { margin-bottom: 5px; }
 .final-product-cta { display: flex; align-items: center; justify-content: space-between; gap: 18px; background: linear-gradient(90deg, rgba(45,212,167,0.09), rgba(90,169,247,0.07)); border: 1px solid rgba(45, 212, 167, 0.35); border-radius: 12px; padding: 18px 22px; margin: 26px 0; flex-wrap: wrap; }
 .final-product-cta .fp-title { font-weight: 700; font-size: 16px; margin-bottom: 3px; }
 .final-product-cta .fp-sub { color: var(--muted); font-size: 13.5px; max-width: 640px; }
+.role-chip { display: inline-block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--accent); border: 1px solid rgba(45,212,167,0.4); border-radius: 999px; padding: 2px 9px; }

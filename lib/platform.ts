@@ -17,29 +17,86 @@ import crypto from 'crypto';
 const OWNER_EMAIL = process.env.PLATFORM_EMAIL || 'aadijindal258@gmail.com';
 const PASSCODE = process.env.PLATFORM_PASSCODE || 'recrypt-preview';
 
-export function platformToken(): string {
-  return crypto.createHmac('sha256', PASSCODE).update(OWNER_EMAIL).digest('hex');
+export type Role = 'owner' | 'approver' | 'viewer';
+
+interface Member {
+  email: string;
+  role: Role;
 }
 
-export function checkLogin(email: string, passcode: string): boolean {
-  const a = Buffer.from(email.trim().toLowerCase());
-  const b = Buffer.from(OWNER_EMAIL.toLowerCase());
-  const emailOk = a.length === b.length && crypto.timingSafeEqual(a, b);
+/**
+ * Team members. The owner is always present. Additional members come from the
+ * PLATFORM_TEAM env var: "email:role,email:role" (role ∈ approver|viewer).
+ * Everyone shares the org PASSCODE in this preview; real SSO (Okta/SAML) is
+ * the funded roadmap. This models the ROLE system — who may approve merges —
+ * which is the part that matters for the audit story.
+ */
+function team(): Member[] {
+  const members: Member[] = [{ email: OWNER_EMAIL.toLowerCase(), role: 'owner' }];
+  for (const spec of (process.env.PLATFORM_TEAM || '').split(',')) {
+    const [email, role] = spec.split(':').map((s) => s.trim());
+    if (email && (role === 'approver' || role === 'viewer')) {
+      members.push({ email: email.toLowerCase(), role });
+    }
+  }
+  return members;
+}
+
+export function roleFor(email: string): Role | null {
+  return team().find((m) => m.email === email.trim().toLowerCase())?.role ?? null;
+}
+
+/** Token binds the email + role, so it survives across requests without a DB. */
+export function platformToken(email: string, role: Role): string {
+  return `${Buffer.from(`${email}|${role}`).toString('base64url')}.${crypto
+    .createHmac('sha256', PASSCODE)
+    .update(`${email}|${role}`)
+    .digest('hex')}`;
+}
+
+export function checkLogin(email: string, passcode: string): Role | null {
+  const role = roleFor(email);
+  if (!role) return null;
   const p = Buffer.from(passcode);
   const q = Buffer.from(PASSCODE);
   const passOk = p.length === q.length && crypto.timingSafeEqual(p, q);
-  return emailOk && passOk;
+  return passOk ? role : null;
 }
 
+export interface Session {
+  email: string;
+  role: Role;
+}
+
+export function verifyToken(token: string | undefined): Session | null {
+  if (!token || !token.includes('.')) return null;
+  const [payload, mac] = token.split('.');
+  let decoded: string;
+  try {
+    decoded = Buffer.from(payload, 'base64url').toString('utf8');
+  } catch {
+    return null;
+  }
+  const expected = crypto.createHmac('sha256', PASSCODE).update(decoded).digest('hex');
+  const a = Buffer.from(mac);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  const [email, role] = decoded.split('|');
+  if (role !== 'owner' && role !== 'approver' && role !== 'viewer') return null;
+  return { email, role };
+}
+
+/** Back-compat boolean check used by read-only console endpoints. */
 export function checkToken(token: string | undefined): boolean {
-  if (!token) return false;
-  const t = Buffer.from(token);
-  const expected = Buffer.from(platformToken());
-  return t.length === expected.length && crypto.timingSafeEqual(t, expected);
+  return verifyToken(token) !== null;
 }
 
 export function ownerEmail(): string {
   return OWNER_EMAIL;
+}
+
+export function teamRoster(): Member[] {
+  return team();
 }
 
 // ---------------------------------------------------------------------------

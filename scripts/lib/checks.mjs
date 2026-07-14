@@ -248,6 +248,17 @@ export async function runChecks(base, { section = () => {} } = {}) {
     t.ok((await fetch(base + '/api/reverify', { method: 'POST' })).status === 401, 'agility drill without session → 401');
   }
 
+  section('real PR creation — guarded behind GITHUB_TOKEN');
+  {
+    // needs a real analyzed finding; use the api-gateway sample
+    const { scan } = await scanAndGet(base, { repoId: 'api-gateway' });
+    const f = scan.findings[0];
+    await post(base, `/api/scan/${scan.id}/findings/${f.id}/analyze`, {});
+    const r = await post(base, `/api/scan/${scan.id}/findings/${f.id}/openpr`, {});
+    // Without a token → 503; with a token but sample-repo source → 400 (needs repoUrl). Either proves the guard fires without crashing.
+    t.ok(r.status === 503 || r.status === 400, 'open-PR guarded (503 no token / 400 needs repo)', `got ${r.status}`);
+  }
+
   section('policy engine — live rules & gate verdicts');
   {
     const rules = await get(base, '/api/policy');
@@ -292,6 +303,10 @@ export async function runChecks(base, { section = () => {} } = {}) {
       t.ok(drill.status === 200 && drillData.testsPassed === drillData.testsRun, 'agility drill: fleet re-proven, no regressions', JSON.stringify(drillData));
       const del = await fetch(base + '/api/watch?key=api-gateway', { method: 'DELETE', headers: auth });
       t.ok(del.status === 200, 'watch: unwatch works');
+
+      const fleet = await fetch(base + '/api/platform/fleet', { headers: { cookie } }).then((r) => r.json());
+      t.ok(fleet.session && fleet.session.role === 'owner', 'fleet payload carries session + role');
+      t.ok(fleet.team && fleet.team.length >= 1 && fleet.integrations, 'fleet payload carries team roster + integration status');
     }
   }
 
