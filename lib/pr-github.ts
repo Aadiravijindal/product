@@ -49,18 +49,22 @@ export async function openPullRequest(opts: {
     body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: baseRef.object.sha }),
   });
 
+  // GitHub's contents API wants literal path separators — encode each segment
+  // but keep the slashes, or nested files (src/app/x.js) break.
+  const encodedPath = finding.file.split('/').map(encodeURIComponent).join('/');
+
   // Fetch the existing file's blob SHA on the new branch (needed to update it).
   let existingSha: string | undefined;
   try {
     const existing = await gh<{ sha: string }>(
-      `/repos/${owner}/${repo}/contents/${encodeURIComponent(finding.file)}?ref=${branch}`
+      `/repos/${owner}/${repo}/contents/${encodedPath}?ref=${branch}`
     );
     existingSha = existing.sha;
   } catch {
     existingSha = undefined; // new file
   }
 
-  await gh(`/repos/${owner}/${repo}/contents/${encodeURIComponent(finding.file)}`, {
+  await gh(`/repos/${owner}/${repo}/contents/${encodedPath}`, {
     method: 'PUT',
     body: JSON.stringify({
       message: `Hybrid post-quantum migration: ${finding.file} (${finding.algorithm} → ${a.newAlgorithm})`,
