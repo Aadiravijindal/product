@@ -149,6 +149,14 @@ tr.row-pulse { animation: row-flash 1.6s ease-out 2; }
 .verdict-revised { background: rgba(245, 158, 11, 0.14); color: var(--high); }
 .review-issue { display: flex; gap: 10px; align-items: baseline; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13.5px; }
 .review-issue:last-child { border-bottom: none; }
+.review-rounds { margin: 12px 0 4px; display: flex; flex-direction: column; gap: 6px; }
+.review-round { display: flex; align-items: center; gap: 10px; font-size: 13px; font-family: var(--mono); padding: 7px 12px; border-radius: 8px; border: 1px solid var(--border); }
+.review-round.flawed { background: rgba(245, 158, 11, 0.08); border-color: rgba(245, 158, 11, 0.3); }
+.review-round.clean { background: var(--accent-dim); border-color: rgba(45, 212, 160, 0.35); }
+.review-round .round-n { font-weight: 700; color: var(--text); min-width: 62px; }
+.review-round .round-arrow { color: var(--faint); }
+.review-round.flawed .round-result { color: var(--high); }
+.review-round.clean .round-result { color: var(--accent); }
 .sev-high { background: rgba(244, 89, 95, 0.14); color: var(--critical); }
 .sev-medium { background: rgba(245, 158, 11, 0.14); color: var(--high); }
 .sev-low { background: rgba(133, 149, 167, 0.12); color: var(--muted); }

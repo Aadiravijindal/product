@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import type { Classification, Finding, Review, ReviewIssue, Scan } from './types';
+import type { Classification, Finding, Review, ReviewIssue, ReviewRound, Scan } from './types';
 
 /**
  * Live LLM calls for classification and patch generation.
@@ -225,6 +225,67 @@ Produce a corrected FULL patched file that resolves every issue while keeping th
   });
   const parsed = JSON.parse(firstText(response)) as { patched_code: string; changes: string[]; new_algorithm: string };
   return { patchedCode: parsed.patched_code, changes: parsed.changes, newAlgorithm: parsed.new_algorithm };
+}
+
+// ---------------------------------------------------------------------------
+// Adversarial hardening LOOP — the core differentiator.
+//
+// A blue-team agent (generator) and a red-team agent (reviewer) go back and
+// forth: the reviewer attacks the patch, the generator rewrites it to close
+// every flaw, the reviewer attacks the new version — round after round —
+// until the reviewer can no longer find a defensible flaw, or a safety cap is
+// hit. Each round is one full LLM round-trip, so it is deliberately bounded.
+// ---------------------------------------------------------------------------
+
+const MAX_ROUNDS = 3;
+
+export async function hardenPatchLive(
+  finding: Finding,
+  initial: RemediationResult
+): Promise<{ patch: RemediationResult; review: Review }> {
+  let patch = initial;
+  const rounds: ReviewRound[] = [];
+
+  for (let i = 1; i <= MAX_ROUNDS; i++) {
+    const review = await reviewPatch(finding, patch.patchedCode);
+    rounds.push({
+      round: i,
+      verdict: review.verdict,
+      issueCount: review.issues.length,
+      issues: review.issues,
+      summary: review.summary,
+    });
+
+    // Converged: the attacker approves, or found nothing actionable to revise.
+    if (review.verdict !== 'revised' || review.issues.length === 0) break;
+
+    // Still flawed and we have budget left → generator rewrites and we re-attack.
+    if (i < MAX_ROUNDS) {
+      patch = await revisePatch(finding, patch.patchedCode, review.issues);
+    }
+  }
+
+  const last = rounds[rounds.length - 1];
+  const converged = last.verdict !== 'revised' || last.issueCount === 0;
+  const totalFound = rounds.reduce((n, r) => n + r.issueCount, 0);
+
+  const summary = converged
+    ? rounds.length === 1
+      ? 'An independent red-team agent attacked the patch and found no defensible flaws on the first pass.'
+      : `An independent red-team agent attacked the patch over ${rounds.length} rounds. It surfaced ${totalFound} flaw${totalFound === 1 ? '' : 's'}; the generator rewrote the patch after each round until the reviewer could no longer break it.`
+    : `After ${MAX_ROUNDS} hardening rounds, ${last.issueCount} issue${last.issueCount === 1 ? '' : 's'} remained unresolved — this finding is flagged for a human engineer rather than auto-approved.`;
+
+  return {
+    patch,
+    review: {
+      engine: 'claude',
+      verdict: converged ? (last.verdict === 'revised' ? 'approved_with_notes' : last.verdict) : 'revised',
+      summary,
+      issues: last.issues,
+      checksRun: rounds.length,
+      rounds,
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------

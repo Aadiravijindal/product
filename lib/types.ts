@@ -25,12 +25,23 @@ export interface ReviewIssue {
   resolved?: boolean;
 }
 
+/** One pass of the red-team/blue-team loop: the attacker's verdict on the current patch. */
+export interface ReviewRound {
+  round: number;
+  verdict: 'approved' | 'approved_with_notes' | 'revised';
+  issueCount: number;
+  issues: ReviewIssue[];
+  summary: string;
+}
+
 export interface Review {
   engine: 'claude' | 'builtin';
   verdict: 'approved' | 'approved_with_notes' | 'revised';
   summary: string;
   issues: ReviewIssue[];
   checksRun: number;
+  /** the full attack→harden→re-attack history; last entry is the final state */
+  rounds?: ReviewRound[];
 }
 
 export interface HndlAssessment {

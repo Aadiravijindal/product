@@ -23,8 +23,8 @@ function downloadPatch(finding: Finding, patchedCode: string) {
 const AGENT_STEPS = [
   'Classifying algorithm, key size, and business context…',
   'Generating hybrid post-quantum patch (ML-DSA / ML-KEM)…',
-  'Adversarial review — a second agent attacks the patch…',
-  'Revising if the reviewer found issues, then running real crypto proofs…',
+  'Red-team vs blue-team — an attacker agent breaks the patch, the generator hardens it, round after round…',
+  'Running real ML-DSA / ML-KEM crypto proofs on the hardened patch…',
 ];
 
 function AgentProgress({ live }: { live: boolean }) {
@@ -290,11 +290,26 @@ export default function FindingDetail() {
             </span>
             <span className="engine-tag">
               {a.review.engine === 'claude'
-                ? 'adversarial reviewer: separate Claude agent (did not write the patch)'
+                ? `red-team agent (separate context) · ${a.review.checksRun} attack round${a.review.checksRun === 1 ? '' : 's'}`
                 : `policy checklist: ${a.review.checksRun} static checks`}
             </span>
           </h2>
           <p className="explain" style={{ fontSize: 14 }}>{a.review.summary}</p>
+          {a.review.rounds && a.review.rounds.length > 0 && (
+            <div className="review-rounds">
+              {a.review.rounds.map((r) => (
+                <div key={r.round} className={`review-round ${r.issueCount === 0 ? 'clean' : 'flawed'}`}>
+                  <span className="round-n">Round {r.round}</span>
+                  <span className="round-arrow">→</span>
+                  <span className="round-result">
+                    {r.issueCount === 0
+                      ? 'attacker found no defensible flaw ✓'
+                      : `${r.issueCount} flaw${r.issueCount === 1 ? '' : 's'} found — patch rewritten ✗`}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
           {a.review.issues.length > 0 && (
             <div style={{ marginTop: 10 }}>
               {a.review.issues.map((iss, i) => (

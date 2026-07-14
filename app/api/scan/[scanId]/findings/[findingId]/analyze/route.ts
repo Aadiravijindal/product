@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getScan, saveScan } from '@/lib/store';
-import { claudeAvailable, classifyFinding, generateRemediation, reviewPatch, revisePatch } from '@/lib/claude';
+import { claudeAvailable, classifyFinding, generateRemediation, hardenPatchLive } from '@/lib/claude';
 import { builtinRemediation } from '@/lib/remediation';
 import { assessHndl, builtinReview, proofDigest } from '@/lib/assurance';
 import { runEquivalenceTests } from '@/lib/verify';
@@ -46,20 +46,14 @@ export async function POST(_req: NextRequest, ctx: { params: Promise<{ scanId: s
         generateRemediation(finding),
       ]);
 
-      // Stage 3: independent adversarial review of the generated patch
+      // Stage 3: adversarial hardening LOOP — red-team agent attacks, blue-team
+      // agent rewrites, repeat until the attacker can't break it (bounded rounds).
       let review: Review;
       let patch = remediation;
       try {
-        review = await reviewPatch(finding, patch.patchedCode);
-        // Stage 3b: one bounded revision round if the reviewer demands it
-        if (review.verdict === 'revised' && review.issues.length > 0) {
-          patch = await revisePatch(finding, patch.patchedCode, review.issues);
-          review = {
-            ...review,
-            issues: review.issues.map((i) => ({ ...i, resolved: true })),
-            summary: `${review.summary} The generator produced a revised patch addressing all reviewer findings; the revision is what is shown and tested below.`,
-          };
-        }
+        const hardened = await hardenPatchLive(finding, remediation);
+        patch = hardened.patch;
+        review = hardened.review;
       } catch {
         // Reviewer call failed — fall back to the deterministic policy checks
         review = builtinReview(finding, patch.patchedCode);
