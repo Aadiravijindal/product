@@ -74,15 +74,20 @@ export async function runChecks(base, { section = () => {} } = {}) {
       { file: 'src/main/java/com/acme/auth/AuthService.java', risk: 'High', confidence: 91, usage: 'signing' },
       { file: 'src/main/java/com/acme/auth/TlsConfig.java', risk: 'High', confidence: 61, usage: 'key_exchange' },
     ],
-    'api-gateway': [{ file: 'auth.js', risk: 'High', confidence: 88, usage: 'authentication' }],
+    'api-gateway': [
+      { file: 'auth.js', risk: 'High', confidence: 88, usage: 'authentication' },
+      { file: 'package.json', usage: 'signing', risk: 'High' }, // vendored crypto dependency
+    ],
     'infra-configs': [
       { file: 'nginx.conf', usage: 'key_exchange', risk: 'Critical' },
       { file: 'main.tf', usage: 'signing', risk: 'High' },
       { file: 'k8s-tls-secret.yaml', usage: 'key_exchange', risk: 'Critical' },
+      { file: 'service-cert.pem', usage: 'key_exchange', risk: 'Critical' }, // X.509 cert
+      { file: 'package.json', usage: 'signing', risk: 'High' }, // vendored crypto dependency
     ],
   };
   // exact finding count per repo (nginx.conf legitimately yields 2 findings)
-  const expectedCounts = { 'payment-service': 1, 'auth-service': 2, 'api-gateway': 1, 'infra-configs': 4 };
+  const expectedCounts = { 'payment-service': 1, 'auth-service': 2, 'api-gateway': 2, 'infra-configs': 6 };
   const scans = {};
   for (const [repo, expected] of Object.entries(expectations)) {
     const { scan } = await scanAndGet(base, { repoId: repo });
@@ -270,6 +275,27 @@ export async function runChecks(base, { section = () => {} } = {}) {
     t.ok((await post(base, '/api/policy/check', {})).status === 400, 'gate check without code → 400');
   }
 
+  section('deeper detectors — dependencies & certificates');
+  {
+    const { scan: apigw } = await scanAndGet(base, { repoId: 'api-gateway' });
+    t.ok(apigw?.findings.some((f) => f.findingKey === 'crypto-dependency' && f.file === 'package.json'), 'flags vendored crypto dependency in package.json');
+    const { scan: infra } = await scanAndGet(base, { repoId: 'infra-configs' });
+    t.ok(infra?.findings.some((f) => f.findingKey === 'x509-certificate'), 'flags X.509 certificate material');
+    t.ok(infra?.findings.some((f) => f.findingKey === 'crypto-dependency'), 'flags crypto dependency in config repo');
+    // dependency finding still runs the real pipeline
+    const dep = apigw.findings.find((f) => f.findingKey === 'crypto-dependency');
+    const an = await post(base, `/api/scan/${apigw.id}/findings/${dep.id}/analyze`, {});
+    t.ok(an.status === 200 && an.data.finding.analysis.tests.every((x) => x.passed), 'dependency finding analyzes + proves');
+  }
+
+  section('crypto-agility re-migration — real alternative-target proofs');
+  {
+    const targets = await get(base, '/api/remigrate');
+    t.ok(targets.status === 200 && targets.data.targets.length >= 4, 'lists re-migration targets (ML-DSA-87, SLH-DSA, …)');
+    t.ok(targets.data.targets.some((x) => x.id === 'slh-dsa-128f') && targets.data.targets.some((x) => x.id === 'ml-dsa-87'), 'includes FIPS 205 (SLH-DSA) and ML-DSA-87');
+    t.ok((await fetch(base + '/api/remigrate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ target: 'ml-dsa-87' }) })).status === 401, 're-migration without session → 401');
+  }
+
   section('continuous watch + agility drill (console session; skipped if custom passcode)');
   {
     // Default owner credentials apply when PLATFORM_PASSCODE is unset (the harness case).
@@ -307,6 +333,14 @@ export async function runChecks(base, { section = () => {} } = {}) {
       const fleet = await fetch(base + '/api/platform/fleet', { headers: { cookie } }).then((r) => r.json());
       t.ok(fleet.session && fleet.session.role === 'owner', 'fleet payload carries session + role');
       t.ok(fleet.team && fleet.team.length >= 1 && fleet.integrations, 'fleet payload carries team roster + integration status');
+
+      // re-migration to a real alternative target, with a session
+      const rm = await fetch(base + '/api/remigrate', { method: 'POST', headers: auth, body: JSON.stringify({ target: 'slh-dsa-128f' }) });
+      const rmData = await rm.json();
+      t.ok(rm.status === 200 && rmData.applicable >= 1 && rmData.failed === 0, 're-migrate fleet to SLH-DSA (FIPS 205), all proven', JSON.stringify(rmData));
+      t.ok(typeof rmData.sampleEvidence === 'string' && rmData.sampleEvidence.includes('bytes'), 're-migration returns real signature evidence');
+      const rmBad = await fetch(base + '/api/remigrate', { method: 'POST', headers: auth, body: JSON.stringify({ target: 'nope' }) });
+      t.ok(rmBad.status === 400, 'unknown re-migration target → 400');
     }
   }
 

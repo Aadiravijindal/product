@@ -244,6 +244,42 @@ const PATTERNS: Pattern[] = [
     algorithm: 'Kubernetes TLS secret (RSA cert chain)',
     usageType: 'key_exchange',
   },
+  // ---- Vendored dependencies: crypto libraries in package manifests ----
+  {
+    id: 'dep-npm-crypto',
+    findingKey: 'crypto-dependency',
+    languages: ['config'],
+    // matches "jsonwebtoken": "^9" style manifest entries only
+    regex: /"(jsonwebtoken|node-forge|node-rsa|jsrsasign|jose|elliptic|secp256k1|eccrypto)"\s*:/g,
+    algorithm: 'Vendored classical-crypto dependency',
+    usageType: 'signing',
+  },
+  {
+    id: 'dep-pip-crypto',
+    findingKey: 'crypto-dependency',
+    languages: ['config'],
+    // matches requirements.txt / pip style pins: "pyjwt==2.9" etc.
+    regex: /(^|\n)\s*(pyjwt|python-jose|pycryptodome|ecdsa|rsa|paramiko|josepy)\s*[=<>~!]/gi,
+    algorithm: 'Vendored classical-crypto dependency',
+    usageType: 'signing',
+  },
+  {
+    id: 'dep-maven-go-crypto',
+    findingKey: 'crypto-dependency',
+    languages: ['config'],
+    regex: /bcprov|bcpkix|bouncycastle|golang\.org\/x\/crypto|github\.com\/golang-jwt\/jwt/g,
+    algorithm: 'Vendored classical-crypto dependency',
+    usageType: 'signing',
+  },
+  // ---- X.509 certificate material on disk ----
+  {
+    id: 'cfg-x509-cert',
+    findingKey: 'x509-certificate',
+    languages: ['config', '*'],
+    regex: /-----BEGIN CERTIFICATE-----/g,
+    algorithm: 'X.509 certificate (RSA/ECDSA chain)',
+    usageType: 'key_exchange',
+  },
 ];
 
 export const PATTERN_COUNT = PATTERNS.length;
@@ -256,6 +292,8 @@ export function detectLanguage(filePath: string, code: string): string {
     tf: 'config', yaml: 'config', yml: 'config', conf: 'config', cfg: 'config',
     properties: 'config', ini: 'config', toml: 'config', env: 'config',
     pem: 'config', crt: 'config', cer: 'config', key: 'config', pub: 'config', sh: 'config',
+    // dependency manifests + cert bundles are the "beyond source code" surface
+    json: 'config', txt: 'config', mod: 'config', xml: 'config', gradle: 'config', lock: 'config',
   };
   if (byExt[ext]) return byExt[ext];
   // Heuristics for pasted snippets with no filename

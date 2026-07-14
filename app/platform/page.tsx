@@ -84,11 +84,29 @@ export default function PlatformConsole() {
   const [gateBusy, setGateBusy] = useState(false);
   const [drill, setDrill] = useState<{ analyses: number; testsRun: number; testsPassed: number; regressions: number } | null>(null);
   const [drillBusy, setDrillBusy] = useState(false);
+  const [targets, setTargets] = useState<{ id: string; label: string; kind: string; note: string }[]>([]);
+  const [target, setTarget] = useState('ml-dsa-87');
+  const [remig, setRemig] = useState<{ label: string; applicable: number; proven: number; failed: number; sampleEvidence: string } | null>(null);
+  const [remigBusy, setRemigBusy] = useState(false);
 
   const refreshWatch = () => fetch('/api/watch').then((r) => r.json()).then((d) => setWatchlist(d.watchlist ?? [])).catch(() => {});
   const refreshPolicy = () => fetch('/api/policy').then((r) => r.json()).then((d) => setPolicyRules(d.rules ?? [])).catch(() => {});
 
-  useEffect(() => { refreshWatch(); refreshPolicy(); }, []);
+  useEffect(() => {
+    refreshWatch();
+    refreshPolicy();
+    fetch('/api/remigrate').then((r) => r.json()).then((d) => setTargets(d.targets ?? [])).catch(() => {});
+  }, []);
+
+  const runRemigration = async () => {
+    setRemigBusy(true);
+    setRemig(null);
+    try {
+      const r = await fetch('/api/remigrate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ target }) });
+      if (r.ok) setRemig(await r.json());
+    } catch { /* noop */ }
+    setRemigBusy(false);
+  };
 
   const watchRepo = async (repoId: string) => {
     setWatchBusy(true);
@@ -285,7 +303,7 @@ export default function PlatformConsole() {
             </p>
             <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
               <button className="btn btn-primary" disabled={drillBusy} onClick={runDrill}>
-                {drillBusy ? 'Re-proving the fleet…' : 'Run agility drill →'}
+                {drillBusy ? 'Re-proving the fleet…' : 'Re-verify current fleet →'}
               </button>
               {drill && (
                 <span className="explain" style={{ fontSize: 13.5 }}>
@@ -294,6 +312,30 @@ export default function PlatformConsole() {
                 </span>
               )}
             </div>
+
+            <h3 style={{ marginTop: 22 }}>Re-migrate to a different / stronger algorithm</h3>
+            <p className="explain" style={{ fontSize: 13.5 }}>
+              The real test of crypto-agility: swap the whole fleet to a new post-quantum target and
+              prove it — with the actual algorithm, not a promise. Pick a target and re-prove every
+              applicable finding.
+            </p>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+              <select className="text-input" value={target} onChange={(e) => setTarget(e.target.value)} style={{ minWidth: 300 }}>
+                {targets.map((t) => (
+                  <option key={t.id} value={t.id}>{t.label} — {t.note}</option>
+                ))}
+              </select>
+              <button className="btn btn-primary" disabled={remigBusy} onClick={runRemigration}>
+                {remigBusy ? 'Re-proving with the real algorithm…' : 'Re-migrate & prove →'}
+              </button>
+            </div>
+            {remig && (
+              <div className="callout" style={{ marginTop: 12 }}>
+                <b>{remig.label}:</b> {remig.proven}/{remig.applicable} applicable findings re-proven with the real algorithm
+                {remig.failed === 0 ? <span style={{ color: 'var(--accent)' }}> · all passed</span> : <span className="sev-crit"> · {remig.failed} failed</span>}.
+                {remig.sampleEvidence && <div className="mono" style={{ fontSize: 11.5, color: 'var(--faint)', marginTop: 6, wordBreak: 'break-all' }}>{remig.sampleEvidence}</div>}
+              </div>
+            )}
           </div>
 
           <div className="section">

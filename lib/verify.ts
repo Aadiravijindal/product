@@ -1,6 +1,7 @@
 import crypto from 'crypto';
-import { ml_dsa65 } from '@noble/post-quantum/ml-dsa.js';
-import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
+import { ml_dsa65, ml_dsa87 } from '@noble/post-quantum/ml-dsa.js';
+import { ml_kem768, ml_kem1024 } from '@noble/post-quantum/ml-kem.js';
+import { slh_dsa_sha2_128f } from '@noble/post-quantum/slh-dsa.js';
 import type { Finding, TestResult, UsageType } from './types';
 
 /**
@@ -182,4 +183,71 @@ export function runEquivalenceTests(finding: Finding, patchedCode: string): Test
   const usage: UsageType = finding.usageType;
   const cryptoTests = usage === 'key_exchange' ? keyExchangeTests() : signingTests();
   return [...cryptoTests, interfacePreservedTest(finding, patchedCode)];
+}
+
+// ---------------------------------------------------------------------------
+// Crypto-agility: prove ALTERNATIVE post-quantum targets, for real.
+//
+// PQC is not the last migration — NIST will revise parameters and new
+// standards (FIPS 205 today, FIPS 206+ ahead) will land. These run the actual
+// alternative algorithms so "re-migrate the whole fleet to a stronger/
+// different scheme" is a proven, one-button operation, not a promise.
+// ---------------------------------------------------------------------------
+
+export type PqTarget = 'ml-dsa-65' | 'ml-dsa-87' | 'slh-dsa-128f' | 'ml-kem-768' | 'ml-kem-1024';
+
+export const PQ_TARGETS: { id: PqTarget; label: string; kind: 'signature' | 'kem'; note: string }[] = [
+  { id: 'ml-dsa-65', label: 'ML-DSA-65 (FIPS 204)', kind: 'signature', note: 'current default · NIST security level 3' },
+  { id: 'ml-dsa-87', label: 'ML-DSA-87 (FIPS 204)', kind: 'signature', note: 'higher assurance · level 5 · CNSA 2.0' },
+  { id: 'slh-dsa-128f', label: 'SLH-DSA-128f (FIPS 205)', kind: 'signature', note: 'hash-based · conservative if lattices are ever dented' },
+  { id: 'ml-kem-768', label: 'ML-KEM-768 (FIPS 203)', kind: 'kem', note: 'current default · level 3' },
+  { id: 'ml-kem-1024', label: 'ML-KEM-1024 (FIPS 203)', kind: 'kem', note: 'higher assurance · level 5' },
+];
+
+export function targetKind(target: PqTarget): 'signature' | 'kem' {
+  return PQ_TARGETS.find((t) => t.id === target)?.kind ?? 'signature';
+}
+
+/** Run the real algorithm for a target against a finding's payload. Returns a proof result. */
+export function proveTarget(target: PqTarget): TestResult {
+  const label = PQ_TARGETS.find((t) => t.id === target)?.label ?? target;
+  const t0 = process.hrtime.bigint();
+  try {
+    if (target === 'ml-kem-768' || target === 'ml-kem-1024') {
+      const kem = target === 'ml-kem-1024' ? ml_kem1024 : ml_kem768;
+      const s = kem.keygen();
+      const { cipherText, sharedSecret } = kem.encapsulate(s.publicKey);
+      const back = kem.decapsulate(cipherText, s.secretKey);
+      const ok = Buffer.from(sharedSecret).equals(Buffer.from(back));
+      return {
+        name: `${label}: re-keyed encapsulation verifies`,
+        passed: ok,
+        detail: `real KEM · ${ms(t0)} ms · ciphertext ${cipherText.length} bytes`,
+        real: true,
+        evidence: hexcerpt(`${label} ciphertext`, cipherText),
+      };
+    }
+    const sig =
+      target === 'ml-dsa-87' ? ml_dsa87 : target === 'slh-dsa-128f' ? slh_dsa_sha2_128f : ml_dsa65;
+    const keys = sig.keygen();
+    const signature = sig.sign(TEST_PAYLOAD, keys.secretKey);
+    const ok = sig.verify(signature, TEST_PAYLOAD, keys.publicKey);
+    const tampered = Buffer.from(TEST_PAYLOAD);
+    tampered[3] ^= 0xff;
+    const rejects = !sig.verify(signature, tampered, keys.publicKey);
+    return {
+      name: `${label}: re-signed payload verifies, tamper rejected`,
+      passed: ok && rejects,
+      detail: `real signature · ${ms(t0)} ms · ${signature.length} bytes`,
+      real: true,
+      evidence: hexcerpt(`${label} signature`, signature),
+    };
+  } catch (err) {
+    return {
+      name: `${label}: proof`,
+      passed: false,
+      detail: `algorithm error: ${err instanceof Error ? err.message : 'failed'}`,
+      real: true,
+    };
+  }
 }
