@@ -7,7 +7,7 @@ export async function GET() {
     const migrated = s.findings.filter((f) => f.status === 'migrated').length;
     return {
       id: s.id,
-      name: s.source.type === 'repo' ? s.source.repoName : 'Pasted snippet',
+      name: s.source.type === 'repo' || s.source.type === 'github' ? s.source.repoName : s.source.type === 'cbom' ? s.source.label : 'Pasted snippet',
       createdAt: s.createdAt,
       findings: s.findings.length,
       migrated,

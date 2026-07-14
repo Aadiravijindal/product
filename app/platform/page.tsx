@@ -7,8 +7,18 @@ import Link from 'next/link';
 interface Repo {
   id: string; name: string; team: string; language: string;
   critical: number; high: number; medium: number; migrated: number;
-  lastScanDaysAgo: number; live?: boolean;
+  lastScanDaysAgo: number; live?: boolean; scanId?: string;
 }
+interface RealRun {
+  id: string; scanId: string; source: string; startedAt: string; finishedAt: string;
+  requested: number; completed: number; engine: string; flawsCaught: number;
+  roundsHistogram: { one: number; two: number }; testsPassed: number; testsRun: number;
+}
+interface SimRun {
+  id: string; startedAt: string; finishedAt: string; requested: number; prsOpened: number;
+  merged: number; roundsHistogram: { one: number; two: number }; flawsCaught: number; note: string;
+}
+interface AuditRow { at: string; actor: string; action: string; target: string }
 interface Payload {
   owner: string;
   summary: {
@@ -17,20 +27,28 @@ interface Payload {
     trend: number[]; deadlineYear: number; onTrack: boolean;
   };
   repos: Repo[];
-  fixRuns: { id: string; startedAt: string; finishedAt: string; requested: number; prsOpened: number; merged: number; roundsHistogram: { one: number; two: number }; flawsCaught: number; note: string }[];
+  fixRuns: { real: RealRun[]; simulated: SimRun[] };
   policies: { id: string; rule: string; scope: string; status: string; blockedThisMonth: number }[];
   exceptions: { id: string; rule: string; repo: string; reason: string; approvedBy: string; expires: string }[];
-  audit: { at: string; actor: string; action: string; target: string }[];
+  audit: { real: AuditRow[]; seed: AuditRow[] };
 }
 
-type Tab = 'overview' | 'repos' | 'runs' | 'policy' | 'audit';
+type Tab = 'overview' | 'repos' | 'runs' | 'policy' | 'counterparties' | 'audit';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'repos', label: 'Repositories' },
   { id: 'runs', label: 'Fix runs' },
   { id: 'policy', label: 'Policy gate' },
+  { id: 'counterparties', label: 'Counterparties' },
   { id: 'audit', label: 'Audit trail' },
+];
+
+const COUNTERPARTIES = [
+  { name: 'First National Bank (settlement API)', artifact: 'RS256 request signatures', theirSide: 'Verifier upgrade scheduled Q4 2026', state: 'waiting', blocking: 'legacy-soap-bridge enforcement' },
+  { name: 'CardNet (ISO 8583 bridge)', artifact: 'TLS 1.2 RSA session', theirSide: 'Hybrid X25519MLKEM768 pilot agreed', state: 'in-progress', blocking: '—' },
+  { name: 'Mobile apps ≤ v4.2 (kiosk fleet)', artifact: 'JWT verification', theirSide: 'Forced upgrade window opens Sep 1', state: 'in-progress', blocking: 'pol-4 enforcement on api-gateway' },
+  { name: 'AuditCo (evidence webhook)', artifact: 'ML-DSA-65 detached signatures', theirSide: 'Verifying hybrid since June', state: 'done', blocking: '—' },
 ];
 
 export default function PlatformConsole() {
@@ -38,6 +56,8 @@ export default function PlatformConsole() {
   const [data, setData] = useState<Payload | null>(null);
   const [tab, setTab] = useState<Tab>('overview');
   const [scanning, setScanning] = useState<string | null>(null);
+  const [fixRunning, setFixRunning] = useState(false);
+  const [fixRunMsg, setFixRunMsg] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/platform/fleet')
@@ -61,6 +81,32 @@ export default function PlatformConsole() {
       if (res.ok) router.push(`/scan/${d.scanId}`);
       else setScanning(null);
     } catch { setScanning(null); }
+  };
+
+  const startRealFixRun = async () => {
+    setFixRunning(true);
+    setFixRunMsg(null);
+    try {
+      const scanRes = await fetch('/api/scan', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ repoId: 'infra-configs' }),
+      });
+      const scanD = await scanRes.json();
+      if (!scanRes.ok) throw new Error(scanD.error || 'scan failed');
+      const runRes = await fetch(`/api/scan/${scanD.scanId}/fixrun`, { method: 'POST' });
+      const runD = await runRes.json();
+      if (!runRes.ok) throw new Error(runD.error || 'fix run failed');
+      setFixRunMsg(
+        `Done: ${runD.run.completed}/${runD.run.requested} findings remediated, ${runD.run.testsPassed}/${runD.run.testsRun} proofs passed. Recorded below.`
+      );
+      const fresh = await fetch('/api/platform/fleet').then((r) => r.json());
+      setData(fresh);
+    } catch (e) {
+      setFixRunMsg(e instanceof Error ? e.message : 'Fix run failed.');
+    } finally {
+      setFixRunning(false);
+    }
   };
 
   const logout = async () => {
@@ -206,9 +252,14 @@ export default function PlatformConsole() {
                   <td>{r.lastScanDaysAgo === 0 ? 'today' : `${r.lastScanDaysAgo}d ago`}</td>
                   <td>
                     {r.live ? (
-                      <button className="btn btn-small btn-primary" disabled={scanning !== null} onClick={() => scanLive(r.id)}>
-                        {scanning === r.id ? 'Scanning…' : 'Scan now →'}
-                      </button>
+                      <span style={{ display: 'inline-flex', gap: 6 }}>
+                        {r.scanId && (
+                          <button className="btn btn-small" onClick={() => router.push(`/scan/${r.scanId}`)}>Open</button>
+                        )}
+                        <button className="btn btn-small btn-primary" disabled={scanning !== null || r.id.startsWith('real-')} onClick={() => scanLive(r.id)}>
+                          {scanning === r.id ? 'Scanning…' : 'Scan now →'}
+                        </button>
+                      </span>
                     ) : (
                       <span className="sim-tag">simulated</span>
                     )}
@@ -222,13 +273,43 @@ export default function PlatformConsole() {
 
       {tab === 'runs' && (
         <div className="section">
-          <h2>Overnight fix runs</h2>
+          <h2>Fix runs</h2>
           <p className="explain" style={{ fontSize: 13.5 }}>
-            A fix run takes a batch of findings and executes the full pipeline on each — generate,
-            red-team attack rounds, rewrite, real equivalence proofs — in parallel, then opens one
-            pull request per finding with the battle history and proof bundle attached.
+            A fix run executes the full pipeline — generate, red-team attack rounds, rewrite, real
+            equivalence proofs — across a batch of findings with bounded parallelism, and records
+            honest stats. Runs below marked <span className="live-dot" /> real executed on this deployment.
           </p>
-          {data.fixRuns.map((run) => (
+
+          <div className="run-card run-live">
+            <div className="run-head"><b>Start a real fix run now</b></div>
+            <p className="explain" style={{ fontSize: 13.5 }}>
+              Scans a connected repo and batch-runs the real pipeline across every finding —
+              detection, hardening loop, ML-DSA/ML-KEM proofs — then records the run here.
+            </p>
+            <button className="btn btn-primary" disabled={fixRunning || scanning !== null} onClick={startRealFixRun}>
+              {fixRunning ? 'Running the pipeline…' : 'Run on infra-configs →'}
+            </button>
+            {fixRunMsg && <p className="explain" style={{ fontSize: 13.5, marginTop: 10 }}>{fixRunMsg}</p>}
+          </div>
+
+          {data.fixRuns.real.map((run) => (
+            <div className="run-card" key={run.id} style={{ borderColor: 'rgba(45,212,167,0.35)' }}>
+              <div className="run-head">
+                <b className="mono"><span className="live-dot" />{run.id} · {run.source}</b>
+                <span>{new Date(run.startedAt).toLocaleString()} → {new Date(run.finishedAt).toLocaleTimeString()} · engine: {run.engine}</span>
+              </div>
+              <div className="run-stats">
+                <span><b>{run.completed}</b>/{run.requested} findings remediated</span>
+                <span><b>{run.flawsCaught}</b> flaws caught by the red team</span>
+                <span><b>{run.roundsHistogram.one}</b> clean round 1 · <b>{run.roundsHistogram.two}</b> needed round 2</span>
+                <span><b>{run.testsPassed}</b>/{run.testsRun} equivalence proofs passed</span>
+              </div>
+              <button className="btn btn-small" onClick={() => router.push(`/scan/${run.scanId}/dashboard`)}>Open run dashboard →</button>
+            </div>
+          ))}
+
+          <h2 style={{ marginTop: 26 }}>Representative overnight runs <span className="sim-tag">simulated</span></h2>
+          {data.fixRuns.simulated.map((run) => (
             <div className="run-card" key={run.id}>
               <div className="run-head">
                 <b className="mono">{run.id}</b>
@@ -244,16 +325,36 @@ export default function PlatformConsole() {
               <p className="explain" style={{ fontSize: 13.5, marginBottom: 0 }}>{run.note}</p>
             </div>
           ))}
-          <div className="run-card run-live">
-            <div className="run-head"><b>Run it for real, right now</b></div>
-            <p className="explain" style={{ fontSize: 13.5 }}>
-              The connected repos run this exact pipeline live. Scan one, open a finding, and watch
-              the attack rounds and proofs happen — then open the generated PR from the finding page.
-            </p>
-            <button className="btn btn-primary" disabled={scanning !== null} onClick={() => scanLive('api-gateway')}>
-              {scanning ? 'Starting…' : 'Run live on api-gateway →'}
-            </button>
-          </div>
+        </div>
+      )}
+
+      {tab === 'counterparties' && (
+        <div className="section">
+          <h2>Counterparty rollout tracker <span className="sim-tag">representative</span></h2>
+          <p className="explain" style={{ fontSize: 13.5 }}>
+            Hybrid crypto only fully protects you when both sides upgrade. This tracks every external
+            party that verifies your signatures or terminates your TLS, what they still need to do,
+            and which enforcement steps are blocked on them — the sequencing nobody automates today.
+          </p>
+          <table className="findings">
+            <thead><tr><th>Counterparty</th><th>Shared crypto artifact</th><th>Their side</th><th>State</th><th>Blocking</th></tr></thead>
+            <tbody>
+              {COUNTERPARTIES.map((c) => (
+                <tr key={c.name}>
+                  <td>{c.name}</td>
+                  <td className="mono">{c.artifact}</td>
+                  <td>{c.theirSide}</td>
+                  <td><span className={`badge ${c.state === 'done' ? 'verdict-approved' : c.state === 'in-progress' ? 'verdict-approved_with_notes' : 'verdict-revised'}`}>{c.state}</span></td>
+                  <td>{c.blocking}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="explain" style={{ fontSize: 13.5 }}>
+            Enforcement ordering is derived from the migration plan: verifiers upgrade before signers
+            enforce, key exchange migrates before deadlines, and no policy flips to
+            &ldquo;enforcing&rdquo; while a counterparty above is still in &ldquo;waiting.&rdquo;
+          </p>
         </div>
       )}
 
@@ -308,13 +409,22 @@ export default function PlatformConsole() {
           <h2>Audit trail</h2>
           <p className="explain" style={{ fontSize: 13.5 }}>
             Every agent action, human decision, policy block, and proof bundle — timestamped and
-            attributable. This is the record your auditor reads.
+            attributable. Rows marked <span className="live-dot" /> happened for real on this
+            deployment; the rest are representative.
           </p>
           <table className="findings">
             <thead><tr><th>When</th><th>Actor</th><th>Action</th><th>Target</th></tr></thead>
             <tbody>
-              {data.audit.map((a, i) => (
-                <tr key={i}>
+              {data.audit.real.map((a, i) => (
+                <tr key={`r${i}`}>
+                  <td><span className="live-dot" />{new Date(a.at).toLocaleString()}</td>
+                  <td className="mono">{a.actor}</td>
+                  <td>{a.action}</td>
+                  <td className="mono">{a.target}</td>
+                </tr>
+              ))}
+              {data.audit.seed.map((a, i) => (
+                <tr key={`s${i}`} style={{ opacity: 0.65 }}>
                   <td>{new Date(a.at).toLocaleString()}</td>
                   <td className="mono">{a.actor}</td>
                   <td>{a.action}</td>

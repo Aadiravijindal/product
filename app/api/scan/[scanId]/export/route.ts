@@ -17,7 +17,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ scanId: st
     generatedAt: new Date().toISOString(),
     scan: {
       id: scan.id,
-      source: scan.source.type === 'repo' ? scan.source.repoName : 'pasted-snippet',
+      source: scan.source.type === 'repo' || scan.source.type === 'github' ? scan.source.repoName : scan.source.type === 'cbom' ? scan.source.label : 'pasted-snippet',
       scannedAt: scan.createdAt,
       stats: scan.stats,
     },

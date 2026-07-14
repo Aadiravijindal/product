@@ -102,7 +102,7 @@ export function buildComplianceReport(scan: Scan): ComplianceReport {
     format: 'recrypt-compliance',
     version: 1,
     generatedAt: new Date().toISOString(),
-    system: scan.source.type === 'repo' ? scan.source.repoName : 'pasted-snippet',
+    system: scan.source.type === 'repo' || scan.source.type === 'github' ? scan.source.repoName : scan.source.type === 'cbom' ? scan.source.label : 'pasted-snippet',
     scanId: scan.id,
     summary: `${total} quantum-vulnerable usage(s) mapped to ${frameworks.length} framework(s); ${migrated}/${total} migrated to NIST post-quantum algorithms with equivalence evidence.`,
     frameworks,

@@ -64,7 +64,7 @@ export async function runChecks(base, { section = () => {} } = {}) {
     t.ok(data && typeof data.liveAnalysis === 'boolean', 'health reports live-analysis availability');
 
     const repos = await get(base, '/api/repos');
-    t.ok(repos.status === 200 && repos.data.repos.length === 3, 'lists 3 sample repos');
+    t.ok(repos.status === 200 && repos.data.repos.length === 4, 'lists 4 sample repos');
   }
 
   section('scanning — deterministic sample-repo contract');
@@ -75,18 +75,27 @@ export async function runChecks(base, { section = () => {} } = {}) {
       { file: 'src/main/java/com/acme/auth/TlsConfig.java', risk: 'High', confidence: 61, usage: 'key_exchange' },
     ],
     'api-gateway': [{ file: 'auth.js', risk: 'High', confidence: 88, usage: 'authentication' }],
+    'infra-configs': [
+      { file: 'nginx.conf', usage: 'key_exchange', risk: 'Critical' },
+      { file: 'main.tf', usage: 'signing', risk: 'High' },
+      { file: 'k8s-tls-secret.yaml', usage: 'key_exchange', risk: 'Critical' },
+    ],
   };
+  // exact finding count per repo (nginx.conf legitimately yields 2 findings)
+  const expectedCounts = { 'payment-service': 1, 'auth-service': 2, 'api-gateway': 1, 'infra-configs': 4 };
   const scans = {};
   for (const [repo, expected] of Object.entries(expectations)) {
     const { scan } = await scanAndGet(base, { repoId: repo });
     scans[repo] = scan;
-    t.ok(scan && scan.findings.length === expected.length, `${repo}: ${expected.length} finding(s)`, `got ${scan?.findings.length}`);
+    t.ok(scan && scan.findings.length === expectedCounts[repo], `${repo}: ${expectedCounts[repo]} finding(s)`, `got ${scan?.findings.length}`);
     for (const exp of expected) {
-      const f = scan?.findings.find((x) => x.file === exp.file);
+      const f = scan?.findings.find((x) => x.file === exp.file && x.usageType === exp.usage);
       t.ok(!!f, `${repo}: finding in ${exp.file}`);
       if (!f) continue;
       t.ok(f.risk === exp.risk, `${repo}/${exp.file}: risk ${exp.risk}`, `got ${f.risk}`);
-      t.ok(f.confidence === exp.confidence, `${repo}/${exp.file}: confidence ${exp.confidence}`, `got ${f.confidence}`);
+      if (exp.confidence !== undefined) {
+        t.ok(f.confidence === exp.confidence, `${repo}/${exp.file}: confidence ${exp.confidence}`, `got ${f.confidence}`);
+      }
       t.ok(f.usageType === exp.usage, `${repo}/${exp.file}: usage ${exp.usage}`, `got ${f.usageType}`);
     }
     t.ok(scan?.stats && scan.stats.files >= 1, `${repo}: carries engine stats`);
@@ -184,6 +193,56 @@ export async function runChecks(base, { section = () => {} } = {}) {
     t.ok(body.format === 'recrypt-cbom' && Array.isArray(body.findings), 'CBOM export is well-formed');
     const hist = await get(base, '/api/scans');
     t.ok(hist.status === 200 && hist.data.scans.length >= 1, 'scan history endpoint works');
+  }
+
+  section('CBOM import — discovery-tool inventories become findings');
+  {
+    const doc = {
+      bomFormat: 'CycloneDX',
+      metadata: { tools: [{ name: 'harness-test' }] },
+      components: [
+        { name: 'rsa-2048-signing', cryptoProperties: { assetType: 'algorithm', algorithmProperties: { variant: 'RSA-2048', primitive: 'signature' } }, evidence: { occurrences: [{ location: 'src/sign.c:10' }] } },
+        { name: 'ecdh-p256', cryptoProperties: { assetType: 'algorithm', algorithmProperties: { variant: 'ECDH-P256', primitive: 'key-agree' } } },
+        { name: 'ml-kem-768', cryptoProperties: { assetType: 'algorithm', algorithmProperties: { variant: 'ML-KEM-768' } } },
+      ],
+    };
+    const r = await post(base, '/api/import/cbom', doc);
+    t.ok(r.status === 200 && r.data.findingCount === 2, 'CBOM: 2 vulnerable components imported', `got ${r.data?.findingCount}`);
+    t.ok(r.data?.skippedSafe === 1, 'CBOM: already-PQC component skipped');
+    if (r.status === 200) {
+      const { data } = await get(base, `/api/scan/${r.data.scanId}`);
+      const kex = data?.scan?.findings.find((f) => f.usageType === 'key_exchange');
+      t.ok(!!kex && kex.risk === 'Critical', 'CBOM: key-exchange import is Critical (HNDL)');
+      const an = await post(base, `/api/scan/${r.data.scanId}/findings/${data.scan.findings[0].id}/analyze`, {});
+      t.ok(an.status === 200 && an.data.finding.analysis.tests.every((x) => x.passed), 'CBOM finding runs the full pipeline');
+    }
+    t.ok((await post(base, '/api/import/cbom', { components: [] })).status === 422, 'empty CBOM → 422');
+    t.ok((await post(base, '/api/import/cbom', { components: [{ name: 'aes-only', cryptoProperties: { assetType: 'algorithm', algorithmProperties: { variant: 'AES-256' } } }] })).status === 422, 'nothing vulnerable → 422');
+  }
+
+  section('fix runs — real batch remediation with recorded stats');
+  {
+    const { scan } = await scanAndGet(base, { repoId: 'infra-configs' });
+    const r = await post(base, `/api/scan/${scan.id}/fixrun`, {});
+    t.ok(r.status === 200 && r.data.run.completed === r.data.run.requested, 'fix run completes every finding', JSON.stringify(r.data?.run ?? r.data));
+    t.ok(r.status === 200 && r.data.run.testsRun > 0 && r.data.run.testsPassed === r.data.run.testsRun, 'fix run: all equivalence proofs pass');
+    const again = await post(base, `/api/scan/${scan.id}/fixrun`, {});
+    t.ok(again.status === 400, 'fix run on fully-analyzed scan → 400');
+    const list = await get(base, `/api/scan/${scan.id}/fixrun`);
+    t.ok(list.status === 200 && list.data.runs.length >= 1, 'fix runs are recorded and listable');
+  }
+
+  section('github scanning — URL validation (network fetch not exercised offline)');
+  {
+    t.ok((await post(base, '/api/scan', { githubUrl: 'not a url at all' })).status === 400, 'garbage GitHub URL → 400');
+    t.ok((await post(base, '/api/scan', { githubUrl: 'https://gitlab.com/foo/bar' })).status === 400, 'non-GitHub host → 400');
+  }
+
+  section('enterprise console — auth boundary');
+  {
+    t.ok((await get(base, '/api/platform/fleet')).status === 401, 'fleet API without session → 401');
+    const bad = await post(base, '/api/platform/login', { email: 'x@y.com', passcode: 'wrong' });
+    t.ok(bad.status === 401, 'wrong console credentials → 401');
   }
 
   return t;

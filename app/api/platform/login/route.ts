@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { checkLogin, platformToken } from '@/lib/platform';
+import { appendAudit } from '@/lib/store';
 
 const COOKIE = 'recrypt_platform';
 
@@ -14,6 +15,7 @@ export async function POST(req: NextRequest) {
   if (!checkLogin(body.email ?? '', body.passcode ?? '')) {
     return NextResponse.json({ error: 'Wrong email or passcode.' }, { status: 401 });
   }
+  await appendAudit(body.email!.trim().toLowerCase(), 'Console sign-in', 'enterprise-console');
   const res = NextResponse.json({ ok: true });
   res.cookies.set(COOKIE, platformToken(), {
     httpOnly: true,

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getScan, saveScan } from '@/lib/store';
+import { appendAudit, getScan, saveScan } from '@/lib/store';
 import { claudeAvailable, classifyFinding, generateRemediation, hardenPatchLive } from '@/lib/claude';
 import { builtinRemediation } from '@/lib/remediation';
 import { assessHndl, builtinReview, proofDigest } from '@/lib/assurance';
@@ -63,6 +63,13 @@ export async function POST(_req: NextRequest, ctx: { params: Promise<{ scanId: s
     const analysis = await run;
     finding.analysis = analysis;
     await saveScan(scan);
+    const rounds = analysis.review?.rounds?.length ?? 1;
+    const flaws = analysis.review?.rounds?.reduce((n, r) => n + r.issueCount, 0) ?? 0;
+    await appendAudit(
+      analysis.engine === 'claude' ? 'recrypt-agent' : 'builtin-engine',
+      `Patch generated & verified (${rounds} attack round${rounds === 1 ? '' : 's'}, ${flaws} flaw${flaws === 1 ? '' : 's'} caught, ${analysis.tests.filter((t) => t.passed).length}/${analysis.tests.length} proofs passed)`,
+      finding.file
+    );
     return NextResponse.json({ finding });
   } finally {
     inFlight.delete(flightKey);

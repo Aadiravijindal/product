@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getScan, saveScan } from '@/lib/store';
+import { appendAudit, getScan, saveScan } from '@/lib/store';
 import type { FindingStatus } from '@/lib/types';
 
 const ACTIONS: Record<string, FindingStatus> = {
@@ -28,5 +28,6 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ scanId: st
   finding.reviewer = (body.reviewer || 'Demo User').slice(0, 80);
   finding.reviewedAt = new Date().toISOString();
   await saveScan(scan);
+  await appendAudit(finding.reviewer, `Decision: ${body.action} (${finding.algorithm})`, finding.file);
   return NextResponse.json({ finding });
 }

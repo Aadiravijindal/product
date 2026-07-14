@@ -34,7 +34,7 @@ export default function ScanResults() {
 
   useEffect(load, [load]);
   useEffect(() => {
-    if (scan) window.localStorage.setItem('recrypt.lastScan', JSON.stringify({ id: scan.id, name: scan.source.type === 'repo' ? scan.source.repoName : 'pasted snippet' }));
+    if (scan) window.localStorage.setItem('recrypt.lastScan', JSON.stringify({ id: scan.id, name: scan.source.type === 'repo' || scan.source.type === 'github' ? scan.source.repoName : scan.source.type === 'cbom' ? scan.source.label : 'pasted snippet' }));
   }, [scan]);
 
   const analyzeAll = async () => {
@@ -80,7 +80,7 @@ export default function ScanResults() {
 
   const counts = { Critical: 0, High: 0, Medium: 0 };
   for (const f of scan.findings) counts[f.risk]++;
-  const sourceName = scan.source.type === 'repo' ? scan.source.repoName : scan.source.label;
+  const sourceName = scan.source.type === 'repo' || scan.source.type === 'github' ? scan.source.repoName : scan.source.label;
   const pendingAnalysis = scan.findings.filter((f) => !f.analysis).length;
 
   if (scan.findings.length === 0) {

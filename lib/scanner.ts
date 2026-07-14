@@ -194,6 +194,56 @@ const PATTERNS: Pattern[] = [
     algorithm: 'RSA',
     usageType: 'signing',
   },
+
+  // ---- Config layer: TLS configs, IaC, keys & certs on disk ----
+  {
+    id: 'cfg-tls-legacy-protocols',
+    findingKey: 'tls-legacy-config',
+    languages: ['config'],
+    regex: /ssl_protocols\s+[^\n;]*\bTLSv1(\.[01])?\b|SSLProtocol\s+[^\n]*\b(TLSv1(\.[01])?|SSLv3)\b|(minimum|min)[-_ ]?(tls[-_ ]?version|protocol)\s*[:=]\s*["']?(TLS)?v?1\.[01]\b/gi,
+    algorithm: 'Legacy TLS (1.0/1.1)',
+    usageType: 'key_exchange',
+  },
+  {
+    id: 'cfg-tls-rsa-ciphers',
+    findingKey: 'tls-rsa-kex-config',
+    languages: ['config'],
+    regex: /ssl_ciphers\s+[^\n;]*\b(RSA|ECDHE-RSA|AES128-SHA|DES)\b|SSLCipherSuite\s+[^\n]*\bRSA\b/g,
+    algorithm: 'TLS RSA/ECDHE key exchange',
+    usageType: 'key_exchange',
+  },
+  {
+    id: 'cfg-pem-rsa-key',
+    findingKey: 'pem-rsa-key',
+    languages: ['config', '*'],
+    regex: /-----BEGIN (RSA |EC )?PRIVATE KEY-----/g,
+    algorithm: 'RSA/EC private key material',
+    usageType: 'signing',
+  },
+  {
+    id: 'cfg-ssh-rsa',
+    findingKey: 'ssh-rsa-key',
+    languages: ['config'],
+    regex: /\bssh-rsa\s+AAAA[0-9A-Za-z+/=]+|\becdsa-sha2-nistp\d+\b/g,
+    algorithm: 'SSH RSA/ECDSA host or user key',
+    usageType: 'authentication',
+  },
+  {
+    id: 'cfg-terraform-rsa',
+    findingKey: 'iac-rsa-keygen',
+    languages: ['config'],
+    regex: /resource\s+"tls_private_key"[\s\S]{0,200}?algorithm\s*=\s*"(RSA|ECDSA)"|algorithm\s*=\s*"(RSA|ECDSA)"/g,
+    algorithm: 'IaC-provisioned RSA/ECDSA key',
+    usageType: 'signing',
+  },
+  {
+    id: 'cfg-k8s-tls-secret',
+    findingKey: 'k8s-tls-secret',
+    languages: ['config'],
+    regex: /kind:\s*Secret[\s\S]{0,400}?type:\s*kubernetes\.io\/tls|tls\.key:\s*[A-Za-z0-9+/=]{40,}/g,
+    algorithm: 'Kubernetes TLS secret (RSA cert chain)',
+    usageType: 'key_exchange',
+  },
 ];
 
 export const PATTERN_COUNT = PATTERNS.length;
@@ -203,6 +253,9 @@ export function detectLanguage(filePath: string, code: string): string {
   const byExt: Record<string, string> = {
     py: 'python', java: 'java', js: 'javascript', mjs: 'javascript', cjs: 'javascript',
     ts: 'typescript', tsx: 'typescript', go: 'go', rb: 'ruby', cs: 'csharp',
+    tf: 'config', yaml: 'config', yml: 'config', conf: 'config', cfg: 'config',
+    properties: 'config', ini: 'config', toml: 'config', env: 'config',
+    pem: 'config', crt: 'config', cer: 'config', key: 'config', pub: 'config', sh: 'config',
   };
   if (byExt[ext]) return byExt[ext];
   // Heuristics for pasted snippets with no filename

@@ -106,7 +106,7 @@ export default function Dashboard() {
   const approvedAllPassed = approvedWithTests.filter((f) => f.analysis!.tests.every((t) => t.passed));
   const passRate =
     approvedWithTests.length === 0 ? null : Math.round((approvedAllPassed.length / approvedWithTests.length) * 100);
-  const sourceName = scan.source.type === 'repo' ? scan.source.repoName : scan.source.label;
+  const sourceName = scan.source.type === 'repo' || scan.source.type === 'github' ? scan.source.repoName : scan.source.label;
 
   return (
     <div className="shell">

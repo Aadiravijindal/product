@@ -105,11 +105,39 @@ export interface Finding {
 
 export interface Scan {
   id: string;
-  source: { type: 'repo'; repoId: string; repoName: string } | { type: 'snippet'; label: string };
+  source:
+    | { type: 'repo'; repoId: string; repoName: string }
+    | { type: 'snippet'; label: string }
+    | { type: 'github'; url: string; repoName: string }
+    | { type: 'cbom'; label: string; tool?: string };
   createdAt: string;
   findings: Finding[];
   stats?: { files: number; patterns: number; durationMs: number };
   plan?: MigrationPlan;
+}
+
+/** A real batch remediation run across a scan — the "overnight fix run". */
+export interface FixRunRecord {
+  id: string;
+  scanId: string;
+  source: string;
+  startedAt: string;
+  finishedAt: string;
+  requested: number;
+  completed: number;
+  engine: 'claude' | 'builtin';
+  flawsCaught: number;
+  roundsHistogram: { one: number; two: number };
+  testsPassed: number;
+  testsRun: number;
+}
+
+/** One attributable event in the audit trail. */
+export interface AuditEventRecord {
+  at: string;
+  actor: string;
+  action: string;
+  target: string;
 }
 
 export interface SampleRepoMeta {

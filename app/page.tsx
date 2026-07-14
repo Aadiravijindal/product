@@ -12,6 +12,8 @@ export default function Home() {
   const [repos, setRepos] = useState<SampleRepoMeta[]>([]);
   const [claude, setClaude] = useState<boolean | null>(null);
   const [snippet, setSnippet] = useState('');
+  const [githubUrl, setGithubUrl] = useState('');
+  const [cbom, setCbom] = useState('');
   const [reviewer, setReviewer] = useState('');
   const [scanning, setScanning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -44,7 +46,25 @@ export default function Home() {
     window.localStorage.setItem('recrypt.reviewer', name);
   };
 
-  const startScan = async (body: { repoId?: string; code?: string }, key: string) => {
+  const importCbom = async () => {
+    setScanning('cbom');
+    setError(null);
+    try {
+      const res = await fetch('/api/import/cbom', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: cbom,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'import failed');
+      router.push(`/scan/${data.scanId}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Import failed — please retry.');
+      setScanning(null);
+    }
+  };
+
+  const startScan = async (body: { repoId?: string; code?: string; githubUrl?: string }, key: string) => {
     setScanning(key);
     setError(null);
     try {
@@ -115,6 +135,55 @@ export default function Home() {
             </button>
           </div>
         ))}
+      </div>
+
+      <div className="paste-panel">
+        <h2>Scan a real GitHub repository</h2>
+        <p className="sub" style={{ marginBottom: 12 }}>
+          Point Recrypt at any <b>public</b> GitHub repo — it fetches the source and runs the full
+          detection engine across every code and config file. (Private-repo access via GitHub App
+          is the enterprise roadmap.)
+        </p>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          <input
+            className="text-input"
+            style={{ flex: 1, minWidth: 260 }}
+            placeholder="https://github.com/owner/repo"
+            value={githubUrl}
+            onChange={(e) => setGithubUrl(e.target.value)}
+          />
+          <button
+            className="btn btn-primary"
+            disabled={scanning !== null || githubUrl.trim().length === 0}
+            onClick={() => startScan({ githubUrl }, 'github')}
+          >
+            {scanning === 'github' ? 'Fetching & scanning…' : 'Scan repo'}
+          </button>
+        </div>
+      </div>
+
+      <div className="paste-panel">
+        <h2>Import a CBOM from your discovery tool</h2>
+        <p className="sub" style={{ marginBottom: 12 }}>
+          Already ran IBM Quantum Safe, SandboxAQ, or cbomkit? Paste the CycloneDX CBOM export —
+          Recrypt turns their inventory into remediations. They find it; we fix it.
+        </p>
+        <textarea
+          className="code-input"
+          style={{ minHeight: 110 }}
+          placeholder='{"bomFormat":"CycloneDX","components":[{"name":"rsa-2048","cryptoProperties":{"assetType":"algorithm", ...}}]}'
+          value={cbom}
+          onChange={(e) => setCbom(e.target.value)}
+        />
+        <div style={{ marginTop: 12 }}>
+          <button
+            className="btn btn-primary"
+            disabled={scanning !== null || cbom.trim().length === 0}
+            onClick={importCbom}
+          >
+            {scanning === 'cbom' ? 'Importing…' : 'Import CBOM'}
+          </button>
+        </div>
       </div>
 
       <div className="paste-panel">

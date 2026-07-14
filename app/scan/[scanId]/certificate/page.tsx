@@ -46,7 +46,7 @@ export default function Certificate() {
   const migrated = scan.findings.filter((f) => f.status === 'migrated');
   const flagged = scan.findings.filter((f) => f.status === 'escalated' || (f.status === 'not_reviewed' && f.confidence < 85)).length;
   const testsPassed = migrated.reduce((n, f) => n + (f.analysis?.tests.filter((t) => t.passed).length ?? 0), 0);
-  const sourceName = scan.source.type === 'repo' ? scan.source.repoName : scan.source.label;
+  const sourceName = scan.source.type === 'repo' || scan.source.type === 'github' ? scan.source.repoName : scan.source.label;
   const reviewers = [...new Set(migrated.map((f) => f.reviewer).filter(Boolean))];
 
   return (

@@ -16,7 +16,7 @@ npm run dev                            # http://localhost:3000
 
 ## Demo flow (matches the 10-minute script)
 
-1. **Home** — pick one of the 3 sample repos (Python payments, Java auth, Node API gateway), or paste
+1. **Home** — pick one of the 4 sample repos (Python payments, Java auth, Node API gateway, IaC/config layer), or paste
    any code snippet. Both go through the identical pipeline.
 2. **Scan results** — the CBOM-style table: file, lines, algorithm, usage type, risk, status.
 3. **Finding detail** — the remediation agent: classification → side-by-side hybrid diff →
@@ -27,6 +27,16 @@ npm run dev                            # http://localhost:3000
 5. **Certificate** — printable one-page compliance certificate with certificate ID (Print / Save as PDF).
 
 Product features beyond the core loop:
+- **Scan any public GitHub repo** — paste a github.com URL; Recrypt fetches the source and runs the
+  full detection engine across every code and config file. Real, no OAuth needed for public repos.
+- **Config-layer detection** — legacy TLS in nginx/Apache configs, Terraform-provisioned RSA keys,
+  Kubernetes TLS secrets, PEM/SSH key material (the `infra-configs` sample repo demos it).
+- **CBOM import** — paste a CycloneDX CBOM from IBM Quantum Safe / SandboxAQ / cbomkit and the
+  inventory becomes findings ready for remediation ("they find it, we fix it").
+- **Fix runs** — batch-run the full pipeline (generate → red-team rounds → real proofs) across a
+  whole scan with bounded parallelism; honest stats recorded and listed in the Enterprise Console.
+- **Audit trail** — real events (sign-ins, scans, patches, decisions, fix runs) logged and shown in
+  the console next to the labeled representative feed.
 - **Analyze all** — run the remediation agent across every finding in a scan at once, with live per-row status.
 - **Disk persistence** — scans, analyses, and review decisions survive server restarts (`.recrypt-data.json`).
 - **CBOM export** — download a CycloneDX-inspired JSON of any scan for the customer's own tooling.
@@ -65,13 +75,13 @@ Product features beyond the core loop:
 ## Verify it works (one command)
 
 After `npm run build`, run the built-in verification harness. It boots a
-server, runs 88 automated checks across the whole product (scanning,
+server, runs 149 automated checks across the whole product (scanning,
 the assurance pipeline, real crypto proofs, migration plan, CBOM export,
 error handling), prints a pass/fail summary, and shuts the server down.
 
 ```bash
 npm run build     # once
-npm run verify    # → "88 passed, 0 failed"
+npm run verify    # → "149 passed, 0 failed"
 ```
 
 Other checks:

@@ -7,3 +7,4 @@ next-env.d.ts
 !.env.example
 .DS_Store
 .recrypt-data.json
+.recrypt-aux.json

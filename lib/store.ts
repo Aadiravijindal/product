@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import type { Scan } from './types';
+import type { AuditEventRecord, FixRunRecord, Scan } from './types';
 import { getSampleRepo } from './samples';
 import { PATTERN_COUNT, scanFiles } from './scanner';
 
@@ -167,4 +167,74 @@ export async function allScans(): Promise<Scan[]> {
 
 export async function getFinding(scanId: string, findingId: string) {
   return (await getScan(scanId))?.findings.find((f) => f.id === findingId);
+}
+
+// ---------------------------------------------------------------------------
+// Fix runs + audit trail — small append-only collections, same dual backend.
+// ---------------------------------------------------------------------------
+
+const MAX_EVENTS = 200;
+const MAX_RUNS = 50;
+const AUX_FILE = path.join(process.cwd(), '.recrypt-aux.json');
+
+interface Aux {
+  audit: AuditEventRecord[];
+  fixRuns: FixRunRecord[];
+}
+const ga = globalThis as unknown as { __recryptAux?: Aux };
+
+function aux(): Aux {
+  if (!ga.__recryptAux) {
+    let loaded: Aux = { audit: [], fixRuns: [] };
+    try {
+      if (fs.existsSync(AUX_FILE)) loaded = { ...loaded, ...JSON.parse(fs.readFileSync(AUX_FILE, 'utf8')) };
+    } catch { /* start fresh */ }
+    ga.__recryptAux = loaded;
+  }
+  return ga.__recryptAux;
+}
+
+function persistAux(): void {
+  try {
+    fs.writeFileSync(AUX_FILE, JSON.stringify(aux()));
+  } catch { /* read-only fs — memory only */ }
+}
+
+export async function appendAudit(actor: string, action: string, target: string): Promise<void> {
+  const event: AuditEventRecord = { at: new Date().toISOString(), actor, action, target };
+  if (KV_ENABLED) {
+    await kv(['LPUSH', 'audit:events', JSON.stringify(event)]).catch(() => {});
+    await kv(['LTRIM', 'audit:events', '0', String(MAX_EVENTS - 1)]).catch(() => {});
+    return;
+  }
+  aux().audit.unshift(event);
+  aux().audit.splice(MAX_EVENTS);
+  persistAux();
+}
+
+export async function listAudit(): Promise<AuditEventRecord[]> {
+  if (KV_ENABLED) {
+    const raw = await kv<string[]>(['LRANGE', 'audit:events', '0', String(MAX_EVENTS - 1)]).catch(() => [] as string[]);
+    return (raw || []).map((r) => JSON.parse(r) as AuditEventRecord);
+  }
+  return aux().audit;
+}
+
+export async function addFixRun(run: FixRunRecord): Promise<void> {
+  if (KV_ENABLED) {
+    await kv(['LPUSH', 'fixruns', JSON.stringify(run)]).catch(() => {});
+    await kv(['LTRIM', 'fixruns', '0', String(MAX_RUNS - 1)]).catch(() => {});
+    return;
+  }
+  aux().fixRuns.unshift(run);
+  aux().fixRuns.splice(MAX_RUNS);
+  persistAux();
+}
+
+export async function listFixRuns(): Promise<FixRunRecord[]> {
+  if (KV_ENABLED) {
+    const raw = await kv<string[]>(['LRANGE', 'fixruns', '0', String(MAX_RUNS - 1)]).catch(() => [] as string[]);
+    return (raw || []).map((r) => JSON.parse(r) as FixRunRecord);
+  }
+  return aux().fixRuns;
 }

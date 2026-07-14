@@ -31,6 +31,13 @@ const REPO_DEFS: { id: string; name: string; language: string; description: stri
     description: 'API gateway — issues RS256 JWTs consumed by every downstream service',
     dir: 'api-gateway',
   },
+  {
+    id: 'infra-configs',
+    name: 'infra-configs',
+    language: 'IaC / Config',
+    description: 'Beyond source code — legacy TLS in nginx, Terraform-provisioned RSA keys, a Kubernetes TLS secret',
+    dir: 'infra-configs',
+  },
 ];
 
 function readDirRecursive(root: string, rel = ''): { path: string; content: string }[] {
