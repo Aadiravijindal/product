@@ -29,9 +29,9 @@ interface GateResult {
   violations: { line: number; algorithm: string; usageType: string; ruleId: string; rule: string; action: string }[];
 }
 const UNPATCHABLE = [
-  { asset: 'HSM cluster (payments signing)', why: 'Firmware caps at RSA/ECDSA — no ML-DSA support', plan: 'Vendor PQC firmware GA Q2 2027 → rotate', due: '2027-06-30' },
-  { asset: '40× branch VPN appliances', why: 'TLS stack fixed in hardware', plan: 'Staged replacement, 10/quarter', due: '2027-12-31' },
-  { asset: 'Legacy mainframe channel (ISO 8583)', why: 'Cannot rebuild; crypto in vendor module', plan: 'Wrap in PQC tunnel at the gateway', due: '2026-12-15' },
+  { asset: 'HSM cluster (payments signing)', why: 'Firmware only supports old crypto', plan: 'Vendor quantum-safe firmware — mid 2027', due: '2027-06-30' },
+  { asset: '40 branch VPN appliances', why: 'Crypto is baked into the hardware', plan: 'Replace 10 per quarter', due: '2027-12-31' },
+  { asset: 'Legacy mainframe link', why: "Can't be rebuilt; crypto lives in a vendor module", plan: 'Wrap it in a quantum-safe tunnel', due: '2026-12-15' },
 ];
 interface Payload {
   owner: string;
@@ -50,23 +50,22 @@ interface Payload {
   audit: { real: AuditRow[]; seed: AuditRow[] };
 }
 
-type Tab = 'overview' | 'repos' | 'runs' | 'policy' | 'counterparties' | 'audit' | 'settings';
+type Tab = 'overview' | 'code' | 'fix' | 'rules' | 'activity' | 'settings';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'overview', label: 'Overview' },
-  { id: 'repos', label: 'Repositories' },
-  { id: 'runs', label: 'Fix runs' },
-  { id: 'policy', label: 'Policy gate' },
-  { id: 'counterparties', label: 'Counterparties' },
-  { id: 'audit', label: 'Audit trail' },
+  { id: 'code', label: 'Your code' },
+  { id: 'fix', label: 'Auto-fix' },
+  { id: 'rules', label: 'Rules' },
+  { id: 'activity', label: 'Activity' },
   { id: 'settings', label: 'Settings' },
 ];
 
 const COUNTERPARTIES = [
-  { name: 'First National Bank (settlement API)', artifact: 'RS256 request signatures', theirSide: 'Verifier upgrade scheduled Q4 2026', state: 'waiting', blocking: 'legacy-soap-bridge enforcement' },
-  { name: 'CardNet (ISO 8583 bridge)', artifact: 'TLS 1.2 RSA session', theirSide: 'Hybrid X25519MLKEM768 pilot agreed', state: 'in-progress', blocking: '—' },
-  { name: 'Mobile apps ≤ v4.2 (kiosk fleet)', artifact: 'JWT verification', theirSide: 'Forced upgrade window opens Sep 1', state: 'in-progress', blocking: 'pol-4 enforcement on api-gateway' },
-  { name: 'AuditCo (evidence webhook)', artifact: 'ML-DSA-65 detached signatures', theirSide: 'Verifying hybrid since June', state: 'done', blocking: '—' },
+  { name: 'First National Bank', artifact: 'Signed API requests', theirSide: 'Upgrading late 2026', state: 'waiting' },
+  { name: 'CardNet payment bridge', artifact: 'TLS connection', theirSide: 'Quantum-safe pilot agreed', state: 'in-progress' },
+  { name: 'Mobile apps (older versions)', artifact: 'Login tokens', theirSide: 'Forced update opens Sep 1', state: 'in-progress' },
+  { name: 'AuditCo webhook', artifact: 'Signatures', theirSide: 'Already upgraded', state: 'done' },
 ];
 
 export default function PlatformConsole() {
@@ -185,12 +184,12 @@ export default function PlatformConsole() {
       const runD = await runRes.json();
       if (!runRes.ok) throw new Error(runD.error || 'fix run failed');
       setFixRunMsg(
-        `Done: ${runD.run.completed}/${runD.run.requested} findings remediated, ${runD.run.testsPassed}/${runD.run.testsRun} proofs passed. Recorded below.`
+        `Done — fixed ${runD.run.completed} of ${runD.run.requested} spots, and all ${runD.run.testsPassed} safety checks passed. It's in the list below.`
       );
       const fresh = await fetch('/api/platform/fleet').then((r) => r.json());
       setData(fresh);
     } catch (e) {
-      setFixRunMsg(e instanceof Error ? e.message : 'Fix run failed.');
+      setFixRunMsg(e instanceof Error ? e.message : 'Something went wrong — try again.');
     } finally {
       setFixRunning(false);
     }
@@ -216,31 +215,32 @@ export default function PlatformConsole() {
   if (!data) {
     return (
       <div className="shell">
-        <div className="loading-panel"><div className="spinner" /><div>Loading console…</div></div>
+        <div className="loading-panel"><div className="spinner" /><div>Loading…</div></div>
       </div>
     );
   }
 
   const s = data.summary;
+  const liveRepos = data.repos.filter((r) => r.live);
+  const nextStep =
+    s.critical > 0
+      ? `Fix your ${s.critical} most urgent issue${s.critical === 1 ? '' : 's'} first — head to Auto-fix.`
+      : s.migratedPct < 100
+        ? 'Keep going — run Auto-fix on your remaining repositories.'
+        : "You're fully migrated. Keep watching for anything new.";
 
   return (
     <div className="shell platform-shell">
       <div className="topbar">
         <div className="brand">
           <Link href="/platform"><span className="logo-mark">⬡</span> Recrypt</Link>
-          <span className="brand-sub">Enterprise Console</span>
+          <span className="brand-sub">Dashboard</span>
         </div>
         <nav>
-          <Link href="/">Scanner</Link>
+          <Link href="/">Scan new code</Link>
           <span className="role-chip">{data.session.role}</span>
           <a onClick={logout} style={{ cursor: 'pointer' }}>Sign out</a>
         </nav>
-      </div>
-
-      <div className="preview-banner">
-        Product-preview build. The three <span className="live-dot" /> connected repos run the
-        real scan → red-team loop → proof pipeline end-to-end; the rest of the fleet is a
-        representative simulation of an org-wide deployment.
       </div>
 
       <div className="platform-tabs">
@@ -252,33 +252,48 @@ export default function PlatformConsole() {
         <span className="platform-owner">{data.owner}</span>
       </div>
 
+      {/* ---------------- OVERVIEW ---------------- */}
       {tab === 'overview' && (
         <>
+          <div className="tab-intro">
+            <h1>Your quantum-safety, at a glance</h1>
+            <p>Where your company stands on moving off crypto that quantum computers will break.</p>
+          </div>
+
+          <div className="headline-card">
+            <div className="headline-big">You&rsquo;re <b>{s.migratedPct}%</b> quantum-safe</div>
+            <div className={`headline-sub ${s.onTrack ? 'ok' : 'warn'}`}>
+              {s.onTrack ? '✓ On track' : '⚠ Behind pace'} for the {s.deadlineYear} deadline
+            </div>
+            <div className="next-step">👉 {nextStep}</div>
+          </div>
+
           <div className="stat-row">
             <div className="stat-card">
               <div className="stat-num">{s.exposureScore}<span className="stat-sub">/100</span></div>
-              <div className="stat-label">Quantum exposure score</div>
-              <div className="stat-note ok">▲ {s.exposureScore - s.trend[s.trend.length - 2]} this quarter</div>
+              <div className="stat-label">Safety score</div>
+              <div className="stat-note ok">▲ {s.exposureScore - s.trend[s.trend.length - 2]} this quarter (higher is safer)</div>
             </div>
             <div className="stat-card">
-              <div className="stat-num">{s.migratedPct}%</div>
-              <div className="stat-label">Migrated ({s.migrated} of {s.totalUsages} usages)</div>
-              <div className="stat-note">{s.repos} repositories under continuous scan</div>
+              <div className="stat-num">{s.migrated}<span className="stat-sub">/{s.totalUsages}</span></div>
+              <div className="stat-label">Vulnerable spots fixed</div>
+              <div className="stat-note">across {s.repos} repositories</div>
             </div>
             <div className="stat-card">
               <div className="stat-num warn">{s.critical}</div>
-              <div className="stat-label">Open critical findings</div>
-              <div className="stat-note">key exchange &amp; payment signing first</div>
+              <div className="stat-label">Urgent issues left</div>
+              <div className="stat-note">payments &amp; logins — fix these first</div>
             </div>
             <div className="stat-card">
               <div className="stat-num">{s.deadlineYear}</div>
-              <div className="stat-label">Federal deadline</div>
-              <div className={`stat-note ${s.onTrack ? 'ok' : 'warn'}`}>{s.onTrack ? 'On track at current pace' : 'Behind pace — accelerate'}</div>
+              <div className="stat-label">Deadline</div>
+              <div className={`stat-note ${s.onTrack ? 'ok' : 'warn'}`}>{s.onTrack ? 'on track' : 'accelerate'}</div>
             </div>
           </div>
 
           <div className="section">
-            <h2>Exposure score — last 8 quarters</h2>
+            <h2>Progress over time</h2>
+            <p className="explain soft">Your safety score, quarter by quarter. It climbs as you fix more.</p>
             <div className="trend-bars">
               {s.trend.map((v, i) => (
                 <div className="trend-col" key={i}>
@@ -287,445 +302,410 @@ export default function PlatformConsole() {
                 </div>
               ))}
             </div>
-            <p className="explain" style={{ fontSize: 13.5 }}>
-              Score = migration coverage weighted by open-critical pressure. The acceleration in
-              recent quarters is the overnight fix runs landing.
-            </p>
           </div>
 
           <div className="section">
-            <h2>Crypto-agility drill — re-prove the fleet, live</h2>
-            <p className="explain" style={{ fontSize: 13.5 }}>
-              When NIST revises a parameter set or a new FIPS lands, this is the muscle you exercise:
-              re-execute the real ML-DSA / ML-KEM equivalence proofs on <b>every stored patch</b>
-              across every scan, right now, and surface any regression. PQC is not the last
-              migration — this button is why Recrypt outlives 2030.
-            </p>
-            <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
-              <button className="btn btn-primary" disabled={drillBusy} onClick={runDrill}>
-                {drillBusy ? 'Re-proving the fleet…' : 'Re-verify current fleet →'}
-              </button>
-              {drill && (
-                <span className="explain" style={{ fontSize: 13.5 }}>
-                  {drill.analyses} stored patches re-proven · {drill.testsPassed}/{drill.testsRun} proofs passed ·{' '}
-                  {drill.regressions === 0 ? <b style={{ color: 'var(--accent)' }}>0 regressions</b> : <b className="sev-crit">{drill.regressions} regressions</b>}
-                </span>
-              )}
+            <h2>Which teams need attention</h2>
+            <p className="explain soft">Teams with the most unfixed crypto are at the top.</p>
+            <div className="tbl-wrap">
+              <table className="findings">
+                <thead><tr><th>Team</th><th>Still to fix</th><th>Fixed</th><th>Progress</th></tr></thead>
+                <tbody>
+                  {teams.map(([team, t]) => {
+                    const pct = t.open + t.migrated === 0 ? 0 : Math.round((t.migrated / (t.open + t.migrated)) * 100);
+                    return (
+                      <tr key={team}>
+                        <td>{team}</td>
+                        <td>{t.open}</td>
+                        <td>{t.migrated}</td>
+                        <td>
+                          <div className="mini-meter"><div className="mini-fill" style={{ width: `${pct}%` }} /></div>
+                          <span className="mini-pct">{pct}%</span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
+          </div>
+        </>
+      )}
 
-            <h3 style={{ marginTop: 22 }}>Re-migrate to a different / stronger algorithm</h3>
-            <p className="explain" style={{ fontSize: 13.5 }}>
-              The real test of crypto-agility: swap the whole fleet to a new post-quantum target and
-              prove it — with the actual algorithm, not a promise. Pick a target and re-prove every
-              applicable finding.
-            </p>
-            <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-              <select className="text-input" value={target} onChange={(e) => setTarget(e.target.value)} style={{ minWidth: 300 }}>
-                {targets.map((t) => (
-                  <option key={t.id} value={t.id}>{t.label} — {t.note}</option>
-                ))}
-              </select>
-              <button className="btn btn-primary" disabled={remigBusy} onClick={runRemigration}>
-                {remigBusy ? 'Re-proving with the real algorithm…' : 'Re-migrate & prove →'}
+      {/* ---------------- YOUR CODE ---------------- */}
+      {tab === 'code' && (
+        <>
+          <div className="tab-intro">
+            <h1>Your code</h1>
+            <p>Every repository we check for vulnerable crypto. Hit <b>Watch</b> to keep one checked automatically, forever.</p>
+          </div>
+
+          <div className="section">
+            <div className="section-head">
+              <h2>Always watching</h2>
+              <button className="btn btn-small" disabled={watchBusy} onClick={rescanAll}>
+                {watchBusy ? 'Checking…' : 'Check them all now'}
               </button>
             </div>
-            {remig && (
-              <div className="callout" style={{ marginTop: 12 }}>
-                <b>{remig.label}:</b> {remig.proven}/{remig.applicable} applicable findings re-proven with the real algorithm
-                {remig.failed === 0 ? <span style={{ color: 'var(--accent)' }}> · all passed</span> : <span className="sev-crit"> · {remig.failed} failed</span>}.
-                {remig.sampleEvidence && <div className="mono" style={{ fontSize: 11.5, color: 'var(--faint)', marginTop: 6, wordBreak: 'break-all' }}>{remig.sampleEvidence}</div>}
+            <p className="explain soft">
+              These repos get re-checked automatically every day. If new vulnerable crypto shows up, it&rsquo;s flagged here the same day.
+            </p>
+            {watchlist.length === 0 ? (
+              <div className="empty-inline">Nothing watched yet — click <b>Watch</b> on a repo below to start.</div>
+            ) : (
+              <div className="tbl-wrap">
+                <table className="findings">
+                  <thead><tr><th>Repository</th><th>Last checked</th><th>Issues found</th><th>Anything new?</th><th></th></tr></thead>
+                  <tbody>
+                    {watchlist.map((w) => (
+                      <tr key={w.key}>
+                        <td className="mono"><span className="live-dot" />{w.label}</td>
+                        <td>{w.lastScanAt ? new Date(w.lastScanAt).toLocaleDateString() : '—'}</td>
+                        <td>{w.lastFindingCount}</td>
+                        <td>{w.newSinceLast.length > 0 ? <span className="sev-crit">⚠ {w.newSinceLast.length} new</span> : <span style={{ color: 'var(--accent)' }}>✓ nothing new</span>}</td>
+                        <td style={{ display: 'flex', gap: 6 }}>
+                          {w.lastScanId && <button className="btn btn-small" onClick={() => router.push(`/scan/${w.lastScanId}`)}>View</button>}
+                          <button className="btn btn-small" onClick={() => unwatch(w.key)}>Stop</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>
 
           <div className="section">
-            <h2>Risk by team</h2>
-            <table className="findings">
-              <thead><tr><th>Team</th><th>Open findings</th><th>Migrated</th><th>Progress</th></tr></thead>
-              <tbody>
-                {teams.map(([team, t]) => {
-                  const pct = t.open + t.migrated === 0 ? 0 : Math.round((t.migrated / (t.open + t.migrated)) * 100);
-                  return (
-                    <tr key={team}>
-                      <td>{team}</td>
-                      <td>{t.open}</td>
-                      <td>{t.migrated}</td>
+            <h2>All repositories</h2>
+            <p className="explain soft">
+              <b>Check now</b> runs a full scan and fix. <b>Watch</b> keeps it checked automatically. Green dot = a real repo you can run live.
+            </p>
+            <div className="tbl-wrap">
+              <table className="findings">
+                <thead><tr><th>Repository</th><th>Team</th><th>Urgent</th><th>High</th><th>Fixed</th><th></th></tr></thead>
+                <tbody>
+                  {data.repos.map((r) => (
+                    <tr key={r.id} className={r.live ? 'live-row' : ''}>
+                      <td className="mono">{r.live && <span className="live-dot" />}{r.name}</td>
+                      <td>{r.team}</td>
+                      <td className={r.critical > 0 ? 'sev-crit' : ''}>{r.critical}</td>
+                      <td className={r.high > 0 ? 'sev-high' : ''}>{r.high}</td>
+                      <td>{r.migrated}</td>
                       <td>
-                        <div className="mini-meter"><div className="mini-fill" style={{ width: `${pct}%` }} /></div>
-                        <span className="mini-pct">{pct}%</span>
+                        {r.live ? (
+                          <span style={{ display: 'inline-flex', gap: 6 }}>
+                            {r.scanId && <button className="btn btn-small" onClick={() => router.push(`/scan/${r.scanId}`)}>View</button>}
+                            {!r.id.startsWith('real-') && (
+                              <>
+                                <button className="btn btn-small btn-primary" disabled={scanning !== null} onClick={() => scanLive(r.id)}>
+                                  {scanning === r.id ? 'Checking…' : 'Check now'}
+                                </button>
+                                {!watchlist.some((w) => w.key === r.id) && (
+                                  <button className="btn btn-small" disabled={watchBusy} onClick={() => watchRepo(r.id)}>Watch</button>
+                                )}
+                              </>
+                            )}
+                          </span>
+                        ) : (
+                          <span className="sim-tag">example</span>
+                        )}
                       </td>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </>
       )}
 
-      {tab === 'repos' && (
+      {/* ---------------- AUTO-FIX ---------------- */}
+      {tab === 'fix' && (
         <>
-        <div className="section">
-          <h2>Continuous watch — real monitoring
-            <button className="btn btn-small" style={{ marginLeft: 12 }} disabled={watchBusy} onClick={rescanAll}>
-              {watchBusy ? 'Re-scanning…' : 'Re-scan all now'}
-            </button>
-          </h2>
-          <p className="explain" style={{ fontSize: 13.5 }}>
-            Watched repos are re-scanned on a daily schedule (Vercel cron) and on demand. New
-            quantum-vulnerable usages since the previous pass are flagged as <b>drift</b> and logged
-            to the audit trail — the &ldquo;new commit with RSA in it? caught the same day&rdquo; loop, live.
-          </p>
-          {watchlist.length === 0 ? (
-            <p className="explain" style={{ fontSize: 13.5 }}>
-              Nothing watched yet — use the <b>Watch</b> button on a live repo below.
-            </p>
-          ) : (
-            <table className="findings">
-              <thead><tr><th>Repo</th><th>Kind</th><th>Last scan</th><th>Findings</th><th>Drift since last pass</th><th></th></tr></thead>
-              <tbody>
-                {watchlist.map((w) => (
-                  <tr key={w.key}>
-                    <td className="mono"><span className="live-dot" />{w.label}</td>
-                    <td>{w.kind}</td>
-                    <td>{w.lastScanAt ? new Date(w.lastScanAt).toLocaleString() : '—'}</td>
-                    <td>{w.lastFindingCount}</td>
-                    <td>{w.newSinceLast.length > 0 ? <span className="sev-crit">▲ {w.newSinceLast.length} new: {w.newSinceLast.slice(0, 2).join(', ')}</span> : <span style={{ color: 'var(--accent)' }}>no new vulnerable crypto</span>}</td>
-                    <td style={{ display: 'flex', gap: 6 }}>
-                      {w.lastScanId && <button className="btn btn-small" onClick={() => router.push(`/scan/${w.lastScanId}`)}>Open</button>}
-                      <button className="btn btn-small" onClick={() => unwatch(w.key)}>Unwatch</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-        <div className="section">
-          <h2>Repositories under continuous scan</h2>
-          <p className="explain" style={{ fontSize: 13.5 }}>
-            Rows marked <span className="live-dot" /> live are wired to the real pipeline — scanning
-            one runs actual detection, the two-agent hardening loop, and real ML-DSA/ML-KEM proofs.
-          </p>
-          <table className="findings">
-            <thead><tr><th>Repository</th><th>Team</th><th>Lang</th><th>Critical</th><th>High</th><th>Medium</th><th>Migrated</th><th>Last scan</th><th></th></tr></thead>
-            <tbody>
-              {data.repos.map((r) => (
-                <tr key={r.id} className={r.live ? 'live-row' : ''}>
-                  <td className="mono">{r.live && <span className="live-dot" />}{r.name}</td>
-                  <td>{r.team}</td>
-                  <td>{r.language}</td>
-                  <td className={r.critical > 0 ? 'sev-crit' : ''}>{r.critical}</td>
-                  <td className={r.high > 0 ? 'sev-high' : ''}>{r.high}</td>
-                  <td>{r.medium}</td>
-                  <td>{r.migrated}</td>
-                  <td>{r.lastScanDaysAgo === 0 ? 'today' : `${r.lastScanDaysAgo}d ago`}</td>
-                  <td>
-                    {r.live ? (
-                      <span style={{ display: 'inline-flex', gap: 6 }}>
-                        {r.scanId && (
-                          <button className="btn btn-small" onClick={() => router.push(`/scan/${r.scanId}`)}>Open</button>
-                        )}
-                        {!r.id.startsWith('real-') && (
-                          <>
-                            <button className="btn btn-small btn-primary" disabled={scanning !== null} onClick={() => scanLive(r.id)}>
-                              {scanning === r.id ? 'Scanning…' : 'Scan now →'}
-                            </button>
-                            {!watchlist.some((w) => w.key === r.id) && (
-                              <button className="btn btn-small" disabled={watchBusy} onClick={() => watchRepo(r.id)}>Watch</button>
-                            )}
-                          </>
-                        )}
-                      </span>
-                    ) : (
-                      <span className="sim-tag">simulated</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        </>
-      )}
+          <div className="tab-intro">
+            <h1>Auto-fix</h1>
+            <p>Let the AI fix a whole repo at once — it fixes every vulnerable spot, double-checks its own work, proves it, and gets it ready for your team to review.</p>
+          </div>
 
-      {tab === 'runs' && (
-        <div className="section">
-          <h2>Fix runs</h2>
-          <p className="explain" style={{ fontSize: 13.5 }}>
-            A fix run executes the full pipeline — generate, red-team attack rounds, rewrite, real
-            equivalence proofs — across a batch of findings with bounded parallelism, and records
-            honest stats. Runs below marked <span className="live-dot" /> real executed on this deployment.
-          </p>
-
-          <div className="run-card run-live">
-            <div className="run-head"><b>Start a real fix run now</b></div>
-            <p className="explain" style={{ fontSize: 13.5 }}>
-              Scans a connected repo and batch-runs the real pipeline across every finding —
-              detection, hardening loop, ML-DSA/ML-KEM proofs — then records the run here.
-            </p>
+          <div className="cta-card">
+            <div>
+              <div className="cta-title">Fix a repository now</div>
+              <div className="cta-sub">Runs the full fix across every issue, then shows you the results.</div>
+            </div>
             <button className="btn btn-primary" disabled={fixRunning || scanning !== null} onClick={startRealFixRun}>
-              {fixRunning ? 'Running the pipeline…' : 'Run on infra-configs →'}
+              {fixRunning ? 'Fixing…' : 'Fix a repo →'}
             </button>
-            {fixRunMsg && <p className="explain" style={{ fontSize: 13.5, marginTop: 10 }}>{fixRunMsg}</p>}
           </div>
+          {fixRunMsg && <div className="callout" style={{ marginBottom: 18 }}>{fixRunMsg}</div>}
 
-          {data.fixRuns.real.map((run) => (
-            <div className="run-card" key={run.id} style={{ borderColor: 'rgba(45,212,167,0.35)' }}>
-              <div className="run-head">
-                <b className="mono"><span className="live-dot" />{run.id} · {run.source}</b>
-                <span>{new Date(run.startedAt).toLocaleString()} → {new Date(run.finishedAt).toLocaleTimeString()} · engine: {run.engine}</span>
-              </div>
-              <div className="run-stats">
-                <span><b>{run.completed}</b>/{run.requested} findings remediated</span>
-                <span><b>{run.flawsCaught}</b> flaws caught by the red team</span>
-                <span><b>{run.roundsHistogram.one}</b> clean round 1 · <b>{run.roundsHistogram.two}</b> needed round 2</span>
-                <span><b>{run.testsPassed}</b>/{run.testsRun} equivalence proofs passed</span>
-              </div>
-              <button className="btn btn-small" onClick={() => router.push(`/scan/${run.scanId}/dashboard`)}>Open run dashboard →</button>
+          {data.fixRuns.real.length > 0 && (
+            <div className="section">
+              <h2>Fixes you&rsquo;ve run</h2>
+              {data.fixRuns.real.map((run) => (
+                <div className="run-card" key={run.id} style={{ borderColor: 'var(--accent-line)' }}>
+                  <div className="run-head">
+                    <b><span className="live-dot" />{run.source}</b>
+                    <span>{new Date(run.startedAt).toLocaleString()}</span>
+                  </div>
+                  <div className="run-stats">
+                    <span><b>{run.completed}</b> spots fixed</span>
+                    <span><b>{run.flawsCaught}</b> mistakes the AI caught in itself</span>
+                    <span><b>{run.testsPassed}/{run.testsRun}</b> safety checks passed</span>
+                  </div>
+                  <button className="btn btn-small" onClick={() => router.push(`/scan/${run.scanId}/dashboard`)}>See details →</button>
+                </div>
+              ))}
             </div>
-          ))}
+          )}
 
-          <h2 style={{ marginTop: 26 }}>Representative overnight runs <span className="sim-tag">simulated</span></h2>
-          {data.fixRuns.simulated.map((run) => (
-            <div className="run-card" key={run.id}>
-              <div className="run-head">
-                <b className="mono">{run.id}</b>
-                <span>{new Date(run.startedAt).toLocaleString()} → {new Date(run.finishedAt).toLocaleTimeString()}</span>
+          <div className="section">
+            <h2>Example: a typical overnight run <span className="sim-tag">example</span></h2>
+            <p className="explain soft">This is what a big nightly fix looks like across many repos at once.</p>
+            {data.fixRuns.simulated.map((run) => (
+              <div className="run-card" key={run.id}>
+                <div className="run-head">
+                  <b>{new Date(run.startedAt).toLocaleDateString()} overnight run</b>
+                  <span>{run.requested} issues</span>
+                </div>
+                <div className="run-stats">
+                  <span><b>{run.prsOpened}</b> fixes opened</span>
+                  <span><b>{run.merged}</b> approved &amp; merged</span>
+                  <span><b>{run.flawsCaught}</b> mistakes caught &amp; corrected</span>
+                </div>
+                <p className="explain soft" style={{ marginBottom: 0 }}>{run.note}</p>
               </div>
-              <div className="run-stats">
-                <span><b>{run.requested}</b> findings</span>
-                <span><b>{run.prsOpened}</b> PRs opened</span>
-                <span><b>{run.merged}</b> merged</span>
-                <span><b>{run.flawsCaught}</b> flaws caught by the red team</span>
-                <span><b>{run.roundsHistogram.one}</b> clean on round 1 · <b>{run.roundsHistogram.two}</b> needed round 2</span>
-              </div>
-              <p className="explain" style={{ fontSize: 13.5, marginBottom: 0 }}>{run.note}</p>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        </>
       )}
 
-      {tab === 'counterparties' && (
-        <div className="section">
-          <h2>Counterparty rollout tracker <span className="sim-tag">representative</span></h2>
-          <p className="explain" style={{ fontSize: 13.5 }}>
-            Hybrid crypto only fully protects you when both sides upgrade. This tracks every external
-            party that verifies your signatures or terminates your TLS, what they still need to do,
-            and which enforcement steps are blocked on them — the sequencing nobody automates today.
-          </p>
-          <table className="findings">
-            <thead><tr><th>Counterparty</th><th>Shared crypto artifact</th><th>Their side</th><th>State</th><th>Blocking</th></tr></thead>
-            <tbody>
-              {COUNTERPARTIES.map((c) => (
-                <tr key={c.name}>
-                  <td>{c.name}</td>
-                  <td className="mono">{c.artifact}</td>
-                  <td>{c.theirSide}</td>
-                  <td><span className={`badge ${c.state === 'done' ? 'verdict-approved' : c.state === 'in-progress' ? 'verdict-approved_with_notes' : 'verdict-revised'}`}>{c.state}</span></td>
-                  <td>{c.blocking}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <p className="explain" style={{ fontSize: 13.5 }}>
-            Enforcement ordering is derived from the migration plan: verifiers upgrade before signers
-            enforce, key exchange migrates before deadlines, and no policy flips to
-            &ldquo;enforcing&rdquo; while a counterparty above is still in &ldquo;waiting.&rdquo;
-          </p>
-
-          <h2 style={{ marginTop: 26 }}>Unpatchable assets — track &amp; plan <span className="sim-tag">representative</span></h2>
-          <p className="explain" style={{ fontSize: 13.5 }}>
-            What software can&rsquo;t fix, the platform still owns: hardware and appliances that can&rsquo;t
-            take a PQC patch get a replacement schedule your auditor can read.
-          </p>
-          <table className="findings">
-            <thead><tr><th>Asset</th><th>Why it can&rsquo;t be patched</th><th>Plan</th><th>Due</th></tr></thead>
-            <tbody>
-              {UNPATCHABLE.map((u) => (
-                <tr key={u.asset}>
-                  <td>{u.asset}</td>
-                  <td>{u.why}</td>
-                  <td>{u.plan}</td>
-                  <td className="mono">{u.due}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {tab === 'policy' && (
+      {/* ---------------- RULES ---------------- */}
+      {tab === 'rules' && (
         <>
-          <div className="section">
-            <h2>Crypto policy gate</h2>
-            <p className="explain" style={{ fontSize: 13.5 }}>
-              Enforced on every pull request across the org. New quantum-vulnerable crypto cannot merge;
-              exceptions require CISO sign-off and expire automatically.
-            </p>
-            <table className="findings">
-              <thead><tr><th>Rule</th><th>Scope</th><th>Status (click to flip)</th><th>Blocked this month</th></tr></thead>
-              <tbody>
-                {(policyRules.length > 0 ? policyRules : data.policies).map((p) => (
-                  <tr key={p.id}>
-                    <td>{p.rule}</td>
-                    <td>{p.scope}</td>
-                    <td>
-                      <button
-                        className={`badge ${p.status === 'enforcing' ? 'verdict-approved' : 'verdict-approved_with_notes'}`}
-                        style={{ cursor: 'pointer', border: 'none' }}
-                        onClick={() => togglePolicy(p.id, p.status !== 'enforcing')}
-                        title="Toggle enforcing / monitor-only (persisted, audited)"
-                      >
-                        {p.status}
-                      </button>
-                    </td>
-                    <td>{p.blockedThisMonth}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <p className="explain" style={{ fontSize: 13.5 }}>
-              Toggles are live: state persists server-side and every flip lands in the audit trail.
-            </p>
+          <div className="tab-intro">
+            <h1>Rules</h1>
+            <p>Stop new vulnerable crypto from ever getting into your code. These run automatically on every change your team makes.</p>
           </div>
 
           <div className="section">
-            <h2>Test code against the gate — live</h2>
-            <p className="explain" style={{ fontSize: 13.5 }}>
-              Paste a diff or snippet: the real detection engine evaluates it against the enabled
-              policies and returns the exact merge verdict the CI gate would give.
-            </p>
+            <h2>Your rules</h2>
+            <p className="explain soft">Click a status to turn a rule on (blocks) or set it to warn-only.</p>
+            <div className="tbl-wrap">
+              <table className="findings">
+                <thead><tr><th>Rule</th><th>Applies to</th><th>Status</th><th>Blocked this month</th></tr></thead>
+                <tbody>
+                  {(policyRules.length > 0 ? policyRules : data.policies).map((p) => (
+                    <tr key={p.id}>
+                      <td>{p.rule}</td>
+                      <td>{p.scope}</td>
+                      <td>
+                        <button
+                          className={`badge ${p.status === 'enforcing' ? 'verdict-approved' : 'verdict-approved_with_notes'}`}
+                          style={{ cursor: 'pointer' }}
+                          onClick={() => togglePolicy(p.id, p.status !== 'enforcing')}
+                          title="Click to switch between blocking and warn-only"
+                        >
+                          {p.status === 'enforcing' ? 'blocking' : 'warn only'}
+                        </button>
+                      </td>
+                      <td>{p.blockedThisMonth}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="section">
+            <h2>Try it out</h2>
+            <p className="explain soft">Paste some code and see whether your rules would let it through.</p>
             <textarea
               className="code-input"
-              style={{ minHeight: 90 }}
+              style={{ minHeight: 84 }}
               placeholder={'const token = jwt.sign(payload, key, { algorithm: "RS256" });'}
               value={gateCode}
               onChange={(e) => setGateCode(e.target.value)}
             />
-            <div style={{ marginTop: 10, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+            <div style={{ marginTop: 12, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
               <button className="btn btn-primary" disabled={gateBusy || gateCode.trim().length === 0} onClick={checkGate}>
-                {gateBusy ? 'Checking…' : 'Run gate check'}
+                {gateBusy ? 'Checking…' : 'Check this code'}
               </button>
               {gateResult && (
                 <span className={`badge ${gateResult.verdict === 'pass' ? 'verdict-approved' : gateResult.verdict === 'warn' ? 'verdict-approved_with_notes' : 'verdict-revised'}`}>
-                  {gateResult.verdict === 'pass' ? 'PASS — would merge' : gateResult.verdict === 'warn' ? 'WARN — merges with warnings' : 'BLOCKED — merge denied'}
+                  {gateResult.verdict === 'pass' ? '✓ Allowed' : gateResult.verdict === 'warn' ? '⚠ Allowed with a warning' : '✕ Blocked'}
                 </span>
               )}
             </div>
             {gateResult && gateResult.violations.length > 0 && (
-              <div style={{ marginTop: 10 }}>
+              <div style={{ marginTop: 12 }}>
                 {gateResult.violations.map((v, i) => (
                   <div className="review-issue" key={i}>
-                    <span className={`badge ${v.action === 'BLOCK' ? 'sev-high' : 'sev-medium'}`}>{v.action}</span>
-                    <span>line {v.line}: <b>{v.algorithm}</b> ({v.usageType}) — violates {v.ruleId}: {v.rule}</span>
+                    <span className={`badge ${v.action === 'BLOCK' ? 'sev-high' : 'sev-medium'}`}>{v.action === 'BLOCK' ? 'blocked' : 'warning'}</span>
+                    <span>Line {v.line}: <b>{v.algorithm}</b> isn&rsquo;t quantum-safe — {v.rule}</span>
                   </div>
                 ))}
               </div>
             )}
           </div>
+        </>
+      )}
+
+      {/* ---------------- ACTIVITY ---------------- */}
+      {tab === 'activity' && (
+        <>
+          <div className="tab-intro">
+            <h1>Activity</h1>
+            <p>A complete, timestamped log of everything — every scan, fix, and decision. This is what you hand your auditor.</p>
+          </div>
           <div className="section">
-            <h2>Active exceptions</h2>
-            <table className="findings">
-              <thead><tr><th>Repository</th><th>Rule</th><th>Reason</th><th>Approved by</th><th>Expires</th></tr></thead>
-              <tbody>
-                {data.exceptions.map((e) => (
-                  <tr key={e.id}>
-                    <td className="mono">{e.repo}</td>
-                    <td className="mono">{e.rule}</td>
-                    <td>{e.reason}</td>
-                    <td>{e.approvedBy}</td>
-                    <td>{e.expires}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <p className="explain" style={{ fontSize: 13.5 }}>
-              The same gate ships today as a CI script — <code>npm run gate</code> — and a GitHub
-              Actions workflow in this repo.
-            </p>
+            <div className="tbl-wrap">
+              <table className="findings">
+                <thead><tr><th>When</th><th>Who / what</th><th>What happened</th><th>Where</th></tr></thead>
+                <tbody>
+                  {data.audit.real.map((a, i) => (
+                    <tr key={`r${i}`}>
+                      <td><span className="live-dot" />{new Date(a.at).toLocaleString()}</td>
+                      <td className="mono">{a.actor}</td>
+                      <td>{a.action}</td>
+                      <td className="mono">{a.target}</td>
+                    </tr>
+                  ))}
+                  {data.audit.seed.map((a, i) => (
+                    <tr key={`s${i}`} style={{ opacity: 0.6 }}>
+                      <td>{new Date(a.at).toLocaleString()}</td>
+                      <td className="mono">{a.actor}</td>
+                      <td>{a.action}</td>
+                      <td className="mono">{a.target}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </>
       )}
 
+      {/* ---------------- SETTINGS ---------------- */}
       {tab === 'settings' && (
         <>
-          <div className="section">
-            <h2>Integrations</h2>
-            <p className="explain" style={{ fontSize: 13.5 }}>
-              Live status of the connectors that power the real workflows. Each is enabled by setting
-              one environment variable — no code changes.
-            </p>
-            <table className="findings">
-              <thead><tr><th>Integration</th><th>Status</th><th>Enables</th><th>Env var</th></tr></thead>
-              <tbody>
-                <tr><td>GitHub (private repos + real PRs)</td><td>{data.integrations.github ? <span className="badge verdict-approved">connected</span> : <span className="badge verdict-revised">not set</span>}</td><td>Scan private repos, open real pull requests</td><td className="mono">GITHUB_TOKEN</td></tr>
-                <tr><td>Slack / webhook alerts</td><td>{data.integrations.slack ? <span className="badge verdict-approved">connected</span> : <span className="badge verdict-revised">not set</span>}</td><td>Drift, fix-run, and PR notifications</td><td className="mono">SLACK_WEBHOOK_URL</td></tr>
-                <tr><td>Live AI pipeline</td><td>{data.integrations.liveAI ? <span className="badge verdict-approved">connected</span> : <span className="badge verdict-revised">not set</span>}</td><td>Live classification + red-team loop</td><td className="mono">ANTHROPIC_API_KEY</td></tr>
-                <tr><td>Shared store (Redis)</td><td>{data.integrations.redis ? <span className="badge verdict-approved">connected</span> : <span className="badge verdict-approved_with_notes">in-memory</span>}</td><td>Cross-instance persistence on serverless</td><td className="mono">KV_REST_API_URL</td></tr>
-              </tbody>
-            </table>
+          <div className="tab-intro">
+            <h1>Settings</h1>
+            <p>Connections, your team, and the advanced tools.</p>
           </div>
-          <div className="section">
-            <h2>Team &amp; roles</h2>
-            <p className="explain" style={{ fontSize: 13.5 }}>
-              Roles gate who can approve merges. Owners and approvers can approve; viewers are
-              read-only. Add members with the <code>PLATFORM_TEAM</code> env var
-              (<span className="mono">email:approver,email:viewer</span>). Full SSO (Okta/SAML) is the
-              funded roadmap; the role model that drives the audit trail is live now.
-            </p>
-            <table className="findings">
-              <thead><tr><th>Member</th><th>Role</th><th>Can approve merges?</th></tr></thead>
-              <tbody>
-                {data.team.map((m) => (
-                  <tr key={m.email}>
-                    <td className="mono">{m.email}{m.email === data.session.email ? ' (you)' : ''}</td>
-                    <td><span className={`badge ${m.role === 'owner' ? 'verdict-approved' : m.role === 'approver' ? 'verdict-approved_with_notes' : 'verdict-revised'}`}>{m.role}</span></td>
-                    <td>{m.role === 'viewer' ? 'no' : 'yes'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
 
-      {tab === 'audit' && (
-        <div className="section">
-          <h2>Audit trail</h2>
-          <p className="explain" style={{ fontSize: 13.5 }}>
-            Every agent action, human decision, policy block, and proof bundle — timestamped and
-            attributable. Rows marked <span className="live-dot" /> happened for real on this
-            deployment; the rest are representative.
-          </p>
-          <table className="findings">
-            <thead><tr><th>When</th><th>Actor</th><th>Action</th><th>Target</th></tr></thead>
-            <tbody>
-              {data.audit.real.map((a, i) => (
-                <tr key={`r${i}`}>
-                  <td><span className="live-dot" />{new Date(a.at).toLocaleString()}</td>
-                  <td className="mono">{a.actor}</td>
-                  <td>{a.action}</td>
-                  <td className="mono">{a.target}</td>
-                </tr>
-              ))}
-              {data.audit.seed.map((a, i) => (
-                <tr key={`s${i}`} style={{ opacity: 0.65 }}>
-                  <td>{new Date(a.at).toLocaleString()}</td>
-                  <td className="mono">{a.actor}</td>
-                  <td>{a.action}</td>
-                  <td className="mono">{a.target}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+          <div className="section">
+            <h2>Connections</h2>
+            <p className="explain soft">What&rsquo;s hooked up. Each turns on by adding one setting — no code needed.</p>
+            <div className="tbl-wrap">
+              <table className="findings">
+                <thead><tr><th>Connection</th><th>Status</th><th>What it does</th></tr></thead>
+                <tbody>
+                  <tr><td>GitHub</td><td>{data.integrations.github ? <span className="badge verdict-approved">connected</span> : <span className="badge verdict-revised">off</span>}</td><td>Scan private repos and open fixes as pull requests</td></tr>
+                  <tr><td>Slack alerts</td><td>{data.integrations.slack ? <span className="badge verdict-approved">connected</span> : <span className="badge verdict-revised">off</span>}</td><td>Ping your team when something new is found or fixed</td></tr>
+                  <tr><td>AI engine</td><td>{data.integrations.liveAI ? <span className="badge verdict-approved">connected</span> : <span className="badge verdict-revised">off</span>}</td><td>Powers the live fixing and self-checking</td></tr>
+                  <tr><td>Shared storage</td><td>{data.integrations.redis ? <span className="badge verdict-approved">connected</span> : <span className="badge verdict-approved_with_notes">basic</span>}</td><td>Keeps data consistent when hosted online</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="section">
+            <h2>Your team</h2>
+            <p className="explain soft">Who can approve fixes. Owners and approvers can approve; viewers can only look.</p>
+            <div className="tbl-wrap">
+              <table className="findings">
+                <thead><tr><th>Person</th><th>Role</th><th>Can approve fixes?</th></tr></thead>
+                <tbody>
+                  {data.team.map((m) => (
+                    <tr key={m.email}>
+                      <td className="mono">{m.email}{m.email === data.session.email ? ' (you)' : ''}</td>
+                      <td><span className={`badge ${m.role === 'owner' ? 'verdict-approved' : m.role === 'approver' ? 'verdict-approved_with_notes' : 'verdict-revised'}`}>{m.role}</span></td>
+                      <td>{m.role === 'viewer' ? 'No' : 'Yes'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <details className="advanced">
+            <summary>Advanced tools</summary>
+
+            <div className="section" style={{ marginTop: 14 }}>
+              <h2>Re-check everything</h2>
+              <p className="explain soft">Re-run all the safety proofs across every fix you&rsquo;ve made, to confirm nothing broke.</p>
+              <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+                <button className="btn" disabled={drillBusy} onClick={runDrill}>
+                  {drillBusy ? 'Re-checking…' : 'Re-check all fixes'}
+                </button>
+                {drill && (
+                  <span className="explain soft">
+                    {drill.testsPassed}/{drill.testsRun} checks passed ·{' '}
+                    {drill.regressions === 0 ? <b style={{ color: 'var(--accent)' }}>nothing broke</b> : <b className="sev-crit">{drill.regressions} broke</b>}
+                  </span>
+                )}
+              </div>
+
+              <h3 style={{ marginTop: 20 }}>Upgrade to a newer algorithm</h3>
+              <p className="explain soft">
+                If a stronger standard comes out, switch everything to it and prove it works — with the real algorithm, in one click.
+              </p>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                <select className="text-input" value={target} onChange={(e) => setTarget(e.target.value)} style={{ minWidth: 280 }}>
+                  {targets.map((t) => (<option key={t.id} value={t.id}>{t.label}</option>))}
+                </select>
+                <button className="btn" disabled={remigBusy} onClick={runRemigration}>
+                  {remigBusy ? 'Proving…' : 'Switch & prove'}
+                </button>
+              </div>
+              {remig && (
+                <div className="callout" style={{ marginTop: 12 }}>
+                  <b>{remig.label}:</b> proved on {remig.proven}/{remig.applicable} spots
+                  {remig.failed === 0 ? <span style={{ color: 'var(--accent)' }}> · all passed ✓</span> : <span className="sev-crit"> · {remig.failed} failed</span>}
+                </div>
+              )}
+            </div>
+
+            <div className="section">
+              <h2>Partners to coordinate with <span className="sim-tag">example</span></h2>
+              <p className="explain soft">Outside companies that also need to upgrade for your fixes to fully protect you.</p>
+              <div className="tbl-wrap">
+                <table className="findings">
+                  <thead><tr><th>Partner</th><th>What you share</th><th>Their status</th></tr></thead>
+                  <tbody>
+                    {COUNTERPARTIES.map((c) => (
+                      <tr key={c.name}>
+                        <td>{c.name}</td>
+                        <td>{c.artifact}</td>
+                        <td><span className={`badge ${c.state === 'done' ? 'verdict-approved' : c.state === 'in-progress' ? 'verdict-approved_with_notes' : 'verdict-revised'}`}>{c.state === 'done' ? 'done' : c.state === 'in-progress' ? 'in progress' : 'waiting'}</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="section">
+              <h2>Hardware we can&rsquo;t patch <span className="sim-tag">example</span></h2>
+              <p className="explain soft">Devices that can&rsquo;t take a software fix get a replacement plan your auditor can read.</p>
+              <div className="tbl-wrap">
+                <table className="findings">
+                  <thead><tr><th>Device</th><th>Why not</th><th>Plan</th><th>By</th></tr></thead>
+                  <tbody>
+                    {UNPATCHABLE.map((u) => (
+                      <tr key={u.asset}><td>{u.asset}</td><td>{u.why}</td><td>{u.plan}</td><td className="mono">{u.due}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </details>
+        </>
       )}
 
       <p className="footnote">
-        Enterprise Console preview · continuous org scanning, SSO/roles, and customer-repo PR
-        automation are the funded roadmap — the pipeline underneath (detection, two-agent hardening,
-        real FIPS 203/204 proofs, policy gate, compliance packs) runs for real in this build.
+        The three green-dot repositories run the real thing end-to-end. The wider company view is
+        realistic example data, so you can see how it looks at scale.
       </p>
     </div>
   );
